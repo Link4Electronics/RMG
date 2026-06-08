@@ -688,10 +688,25 @@ ifneq ($(NO_ASM), 1)
   endif
 endif
 
+# PPC_DYNAREC override: user-requested PPC dynamic recompiler
+ifneq ($(PPC_DYNAREC), )
+  NO_ASM := 0
+  DYNAREC = ppc
+endif
+
 ifneq ($(DYNAREC), )
   CFLAGS += -DDYNAREC
 
-  ifeq ($(NEW_DYNAREC), 1)
+  ifeq ($(DYNAREC), ppc)
+    CFLAGS += -DPPC_DYNAREC
+    SOURCE += \
+      $(SRCDIR)/device/r4300/ppc/ppc_dynarec.c \
+      $(SRCDIR)/device/r4300/ppc/MIPS-to-PPC.c \
+      $(SRCDIR)/device/r4300/ppc/Recompile.c \
+      $(SRCDIR)/device/r4300/ppc/Register-Cache.c \
+      $(SRCDIR)/device/r4300/ppc/FuncTree.c \
+      $(SRCDIR)/device/r4300/ppc/Recomp-Cache.c
+  else ifeq ($(NEW_DYNAREC), 1)
     ifeq ($(DYNAREC), x86)
       CFLAGS += -DNEW_DYNAREC=1
       SOURCE += \

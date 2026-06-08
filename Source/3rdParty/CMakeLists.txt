@@ -81,6 +81,7 @@ ExternalProject_Add(mupen64plus-core
         SRCDIR=${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-core/src 
         SUBDIR=${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-core/subprojects 
         OSD=0 NEW_DYNAREC=1 NO_ASM=$<BOOL:${NO_ASM}> 
+        PPC_DYNAREC=$<BOOL:${PPC_DYNAREC}>
         KEYBINDINGS=0 ACCURATE_FPU=1 VULKAN=0 NETPLAY=$<BOOL:${NETPLAY}> 
         TARGET=${CORE_FILE} DEBUG=${MAKE_DEBUG}
         CC=${MAKE_CC_COMPILER} CXX=${MAKE_CXX_COMPILER}
