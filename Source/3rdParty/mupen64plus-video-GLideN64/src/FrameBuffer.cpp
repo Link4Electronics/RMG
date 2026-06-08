@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <cstdio>
 #include <math.h>
 #include <algorithm>
 #include <vector>
@@ -27,6 +28,8 @@
 #include <Graphics/Parameters.h>
 #include <Graphics/ColorBufferReader.h>
 #include "DisplayWindow.h"
+
+#include <Graphics/OpenGLContext/GLFunctions.h>
 
 using namespace std;
 using namespace graphics;
@@ -893,6 +896,9 @@ void FrameBufferList::saveBuffer(u32 _address, u16 _format, u16 _size, u16 _widt
 	}
 	const bool bNew = m_pCurrent == nullptr;
 	if  (bNew) {
+		DisplayWindow & dw = dwnd();
+		fprintf(stderr, "[saveBuffer] NEW buffer: addr=0x%08x fmt=%d sz=%d w=%d scale=%f m_scaleX=%f m_scaleY=%f\n",
+			_address, _format, _size, _width, scaleX, dw.getScaleX(), dw.getScaleY());
 		// Wasn't found or removed, create a new one
 		m_list.emplace_front();
 		FrameBuffer & buffer = m_list.front();
@@ -1052,17 +1058,25 @@ void FrameBufferList::clearDepthBuffer(DepthBuffer * _pDepthBuffer)
 
 void FrameBuffer_Init()
 {
+	RDRAMtoColorBuffer &rcb = RDRAMtoColorBuffer::get();
+	fprintf(stderr, "[FB_INIT] before: m_pCurBuffer=%p vec.size=%zu\n",
+		(void*)rcb.getCurBuffer(), rcb.getVecAddress().size());
 	frameBufferList().init();
 	if (config.frameBufferEmulation.enable != 0) {
 	ColorBufferToRDRAM::get().init();
 	DepthBufferToRDRAM::get().init();
-	RDRAMtoColorBuffer::get().init();
+	rcb.init();
 	}
+	fprintf(stderr, "[FB_INIT] after: m_pCurBuffer=%p vec.size=%zu\n",
+		(void*)rcb.getCurBuffer(), rcb.getVecAddress().size());
 }
 
 void FrameBuffer_Destroy()
 {
-	RDRAMtoColorBuffer::get().destroy();
+	RDRAMtoColorBuffer &rcb = RDRAMtoColorBuffer::get();
+	fprintf(stderr, "[FB_DESTROY] m_pCurBuffer=%p vec.size=%zu\n",
+		(void*)rcb.getCurBuffer(), rcb.getVecAddress().size());
+	rcb.destroy();
 	DepthBufferToRDRAM::get().destroy();
 	ColorBufferToRDRAM::get().destroy();
 	frameBufferList().destroy();
@@ -1148,6 +1162,7 @@ bool FrameBufferList::RdpUpdate::update(RdpUpdateResult & _result)
 	static const s32 PRESCALE_WIDTH = 640U;
 	static const s32 PRESCALE_HEIGHT = 625U;
 
+	const u32 vi_status_raw = *REG.VI_STATUS;
 	const s32 x_add = _SHIFTR(*REG.VI_X_SCALE, 0, 12);
 	const s32 y_add = _SHIFTR(*REG.VI_Y_SCALE, 0, 12);
 	const u32 v_sync = _SHIFTR(*REG.VI_V_SYNC, 0, 10);
@@ -1161,7 +1176,7 @@ bool FrameBufferList::RdpUpdate::update(RdpUpdateResult & _result)
 
 	const s32 delta_x = x2 - x1;
 	const s32 delta_y = y2 - y1;
-	const u32 vitype = _SHIFTR( *REG.VI_STATUS, 0, 2 );
+	const u32 vitype = _SHIFTR(vi_status_raw, 0, 2);
 
 	const bool serration_pulses = (*REG.VI_STATUS & VI_STATUS_SERRATE_ENABLED) != 0;
 	const bool validinterlace = ((vitype & 2) != 0 ) && serration_pulses;
@@ -1219,24 +1234,33 @@ bool FrameBufferList::RdpUpdate::update(RdpUpdateResult & _result)
 
 	s32 vactivelines = static_cast<s32>(v_sync - (ispal ? 44 : 34));
 	if (vactivelines > PRESCALE_HEIGHT) {
-		LOG(LOG_VERBOSE, "VI_V_SYNC_REG too big");
+		fprintf(stderr, "[rdpUpdate] FAIL vactivelines(%d) > PRESCALE_HEIGHT: vi_status=0x%08x v_sync=%u ispal=%d\n",
+			vactivelines, vi_status_raw, v_sync, ispal);
 		return false;
 	}
 
 	if (vactivelines < 0) {
-		LOG(LOG_VERBOSE, "vactivelines lesser than 0");
+		fprintf(stderr, "[rdpUpdate] FAIL vactivelines(%d) < 0: vi_status=0x%08x v_sync=%u ispal=%d\n",
+			vactivelines, vi_status_raw, v_sync, ispal);
 		return false;
 	}
 
-	if (hres <= 0 || vres <= 0 || ((vitype & 2) == 0 && prevwasblank)) /* early return. */
+	if (hres <= 0 || vres <= 0 || ((vitype & 2) == 0 && prevwasblank)) {
+		fprintf(stderr, "[rdpUpdate] FAIL hres=%d vres=%d vitype=%d prevwasblank=%d vi_status=0x%08x\n",
+			hres, vres, vitype, prevwasblank, vi_status_raw);
 		return false;
+	}
 
 	if ((vitype & 2) == 0) {
 		prevwasblank = true;
+		fprintf(stderr, "[rdpUpdate] FAIL blank: vi_status=0x%08x vitype=%d (prevwasblank was 0, now 1)\n",
+			vi_status_raw, vitype);
 		return false;
 	}
 
 	prevwasblank = false;
+	fprintf(stderr, "[rdpUpdate] OK vi_status=0x%08x v_sync=%u hres=%d vres=%d vitype=%d\n",
+		vi_status_raw, v_sync, hres, vres, vitype);
 
 	_result.vi_hres = static_cast<u32>(hres);
 	_result.vi_vres = static_cast<u32>(vres);
@@ -1486,8 +1510,12 @@ void FrameBufferList::renderBuffer()
 	}
 
 	FrameBuffer *pBuffer = findBuffer(rdpRes.vi_origin);
-	if (pBuffer == nullptr)
+	fprintf(stderr, "[renderBuffer] findBuffer(0x%08x)=%p m_pCurrent=%p\n",
+		rdpRes.vi_origin, (void*)pBuffer, (void*)m_pCurrent);
+	if (pBuffer == nullptr) {
+		fprintf(stderr, "[renderBuffer] *** NO BUFFER FOUND ***\n");
 		return;
+	}
 	pBuffer->m_isMainBuffer = true;
 	m_overscan.setInputBuffer(pBuffer);
 
@@ -1584,6 +1612,14 @@ void FrameBufferList::renderBuffer()
 						hOffset + dstX1,
 						vOffset + static_cast<s32>(dstY1*dstScaleY) };
 
+	fprintf(stderr, "[renderBuffer] dstCoord=[%d,%d,%d,%d] srcCoord=[%d,%d,%d,%d] hOffset=%d vOffset=%d bufW=%d bufH=%d drawW=%d scaleXY=[%.3f,%.3f]\n",
+		dstCoord[0], dstCoord[1], dstCoord[2], dstCoord[3],
+		srcCoord[0], srcCoord[1], srcCoord[2], srcCoord[3],
+		hOffset, vOffset,
+		m_overscan.getBufferWidth(), m_overscan.getBufferHeight(),
+		m_overscan.getDrawingWidth(),
+		dstScaleX, dstScaleY);
+
 	ObjectHandle readBuffer;
 
 	if (pFilteredBuffer->m_pTexture->frameBufferTexture == CachedTexture::fbMultiSample) {
@@ -1632,6 +1668,21 @@ void FrameBufferList::renderBuffer()
 	blitParams.readBuffer = readBuffer;
 	blitParams.invertY = config.frameBufferEmulation.enableOverscan == 0;
 
+	{
+		gfxContext.bindFramebuffer(bufferTarget::READ_FRAMEBUFFER, readBuffer);
+		u8 pixel[4];
+		glReadPixels(pBufferTexture->width/2, pBufferTexture->height/2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+		fprintf(stderr, "[renderBuffer] pre-copyTexturedRect: tex=%u(%dx%d) center=R=%02x G=%02x B=%02x A=%02x\n",
+			pBufferTexture->name, pBufferTexture->width, pBufferTexture->height,
+			pixel[0], pixel[1], pixel[2], pixel[3]);
+		glReadPixels(1, 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+		fprintf(stderr, "[renderBuffer] pre-copyTexturedRect: pixel(1,1)=R=%02x G=%02x B=%02x A=%02x\n",
+			pixel[0], pixel[1], pixel[2], pixel[3]);
+		glReadPixels(pBufferTexture->width-2, pBufferTexture->height-2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+		fprintf(stderr, "[renderBuffer] pre-copyTexturedRect: pixel(w-2,h-2)=R=%02x G=%02x B=%02x A=%02x\n",
+			pixel[0], pixel[1], pixel[2], pixel[3]);
+	}
+
 	drawer.copyTexturedRect(blitParams);
 
 	if (pNextBuffer != nullptr) {
@@ -1664,7 +1715,15 @@ void FrameBufferList::renderBuffer()
 		blitParams.mask = blitMask::COLOR_BUFFER;
 		blitParams.readBuffer = readBuffer;
 
-		drawer.copyTexturedRect(blitParams);
+	// DEBUG: disable depth test to check if Z-buffer rejects all 3D pixels
+	GLboolean depthTestWas = glIsEnabled(GL_DEPTH_TEST);
+	if (depthTestWas) glDisable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+	fprintf(stderr, "[renderBuffer] calling copyTexturedRect (depthTest=%s)\n", depthTestWas ? "ON→OFF" : "OFF");
+
+	drawer.copyTexturedRect(blitParams);
+
+	if (depthTestWas) glEnable(GL_DEPTH_TEST);
 	}
 
 	gfxContext.bindFramebuffer(bufferTarget::READ_FRAMEBUFFER, ObjectHandle::defaultFramebuffer);

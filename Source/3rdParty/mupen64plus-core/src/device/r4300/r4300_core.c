@@ -24,9 +24,14 @@
 #if defined(COUNT_INSTR)
 #include "instr_counters.h"
 #endif
+#ifdef PPC_DYNAREC
+#include "ppc/ppc_dynarec.h"
+#endif
 #include "new_dynarec/new_dynarec.h"
 #include "pure_interp.h"
+#if !defined(PPC_DYNAREC)
 #include "recomp.h"
+#endif
 
 #include "api/callbacks.h"
 #include "api/debugger.h"
@@ -55,7 +60,7 @@ void init_r4300(struct r4300_core* r4300, struct memory* mem, struct mi_controll
     init_cp1(&r4300->cp1, new_dynarec_hot_state);
     init_cp2(&r4300->cp2, new_dynarec_hot_state);
 
-#ifndef NEW_DYNAREC
+#if !defined(NEW_DYNAREC) && !defined(PPC_DYNAREC)
     r4300->recomp.no_compiled_jump = no_compiled_jump;
 #endif
 
@@ -82,7 +87,7 @@ void poweron_r4300(struct r4300_core* r4300)
 
 
     /* recomp init */
-#ifndef NEW_DYNAREC
+#if !defined(NEW_DYNAREC) && !defined(PPC_DYNAREC)
     r4300->recomp.delay_slot_compiled = 0;
     r4300->recomp.fast_memory = 1;
     r4300->recomp.local_rs = 0;
@@ -111,7 +116,7 @@ void poweron_r4300(struct r4300_core* r4300)
 #endif
 
     r4300->recomp.branch_taken = 0;
-#endif /* !NEW_DYNAREC */
+#endif /* !NEW_DYNAREC && !PPC_DYNAREC */
 
     /* setup CP0 registers */
     poweron_cp0(&r4300->cp0);
@@ -152,6 +157,11 @@ void run_r4300(struct r4300_core* r4300)
     {
         DebugMessage(M64MSG_INFO, "Starting R4300 emulator: Dynamic Recompiler");
         r4300->emumode = EMUMODE_DYNAREC;
+#if defined(PPC_DYNAREC)
+        ppc_dynarec_init(r4300);
+        ppc_dynarec_start(r4300);
+        ppc_dynarec_cleanup();
+#else
         init_blocks(&r4300->cached_interp);
 #ifdef NEW_DYNAREC
         new_dynarec_init();
@@ -173,6 +183,7 @@ void run_r4300(struct r4300_core* r4300)
 #endif
 #endif
         free_blocks(&r4300->cached_interp);
+#endif
     }
 #endif
     else /* if (r4300->emumode == EMUMODE_INTERPRETER) */
@@ -409,10 +420,16 @@ void invalidate_r4300_cached_code(struct r4300_core* r4300, uint32_t address, si
 {
     if (r4300->emumode != EMUMODE_PURE_INTERPRETER)
     {
-#ifdef NEW_DYNAREC
+#if defined(NEW_DYNAREC)
         if (r4300->emumode == EMUMODE_DYNAREC)
         {
             invalidate_cached_code_new_dynarec(r4300, address, size);
+        }
+        else
+#elif defined(PPC_DYNAREC)
+        if (r4300->emumode == EMUMODE_DYNAREC)
+        {
+            invalidate_cached_code_ppc(r4300, address, size);
         }
         else
 #endif
@@ -437,9 +454,11 @@ void generic_jump_to(struct r4300_core* r4300, uint32_t address)
 
 #ifndef NO_ASM
     case EMUMODE_DYNAREC:
-#ifdef NEW_DYNAREC
+#if defined(NEW_DYNAREC)
         r4300->new_dynarec_hot_state.pcaddr = address;
         r4300->new_dynarec_hot_state.pending_exception = 1;
+#elif defined(PPC_DYNAREC)
+        ppc_dynarec_jump_to(r4300, address);
 #else
         dynarec_jump_to(r4300, address);
 #endif

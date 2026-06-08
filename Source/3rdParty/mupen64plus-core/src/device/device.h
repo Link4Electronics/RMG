@@ -130,7 +130,7 @@ void init_device(struct device* dev,
     /* si */
     unsigned int si_dma_duration,
     /* rdram */
-    size_t dram_size,
+    uint32_t dram_size,
     /* pif */
     void* jbds[PIF_CHANNELS_COUNT],
     const struct joybus_device_interface* ijbds[PIF_CHANNELS_COUNT],

@@ -15,6 +15,7 @@
 #include <QWindow>
 #include <QTimerEvent>
 #include <QOpenGLContext>
+#include <QSurfaceFormat>
 #include <QWidget>
 
 namespace UserInterface
@@ -27,7 +28,7 @@ class OGLWidget : public QWindow
     OGLWidget(QWidget *);
     ~OGLWidget(void);
 
-    void MoveContextToThread(QThread* thread);
+    void MoveContextToThread(QSurfaceFormat format, QThread* thread);
     QOpenGLContext* GetContext();
 
     void SetHideCursor(bool hide);

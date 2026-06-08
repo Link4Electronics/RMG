@@ -81,6 +81,7 @@ ExternalProject_Add(mupen64plus-core
         SRCDIR=${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-core/src 
         SUBDIR=${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-core/subprojects 
         OSD=0 NEW_DYNAREC=1 NO_ASM=$<BOOL:${NO_ASM}> 
+        PPC_DYNAREC=$<BOOL:${PPC_DYNAREC}> ${PPC_MAKE_FLAGS}
         KEYBINDINGS=0 ACCURATE_FPU=1 VULKAN=0 NETPLAY=$<BOOL:${NETPLAY}> 
         TARGET=${CORE_FILE} DEBUG=${MAKE_DEBUG}
         CC=${MAKE_CC_COMPILER} CXX=${MAKE_CXX_COMPILER}
@@ -98,6 +99,11 @@ ExternalProject_Add(mupen64plus-core
 
 set(APIDIR "${CMAKE_SOURCE_DIR}/Source/3rdParty/mupen64plus-core/src/api")
 
+# When cross-compiling for PPC64, override Makefile's arch auto-detection
+if (PPC_DYNAREC)
+    set(PPC_MAKE_FLAGS HOST_CPU=powerpc64 BIG_ENDIAN=1)
+endif()
+
 ExternalProject_Add(mupen64plus-rsp-cxd4
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-rsp-cxd4/
 
@@ -108,7 +114,7 @@ ExternalProject_Add(mupen64plus-rsp-cxd4
         SRCDIR=${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-rsp-cxd4
         APIDIR=${APIDIR} DEBUG=${MAKE_DEBUG} POSTFIX= 
         CC=${MAKE_CC_COMPILER} CXX=${MAKE_CXX_COMPILER}
-        OPTFLAGS=${MAKE_OPTFLAGS}
+        OPTFLAGS=${MAKE_OPTFLAGS} ${PPC_MAKE_FLAGS}
     BUILD_IN_SOURCE False
     BUILD_ALWAYS True
     BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/mupen64plus-rsp-cxd4
@@ -126,7 +132,7 @@ ExternalProject_Add(mupen64plus-rsp-hle
         SRCDIR=${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-rsp-hle/src
         APIDIR=${APIDIR} DEBUG=${MAKE_DEBUG}
         CC=${MAKE_CC_COMPILER} CXX=${MAKE_CXX_COMPILER}
-        OPTFLAGS=${MAKE_OPTFLAGS}
+        OPTFLAGS=${MAKE_OPTFLAGS} ${PPC_MAKE_FLAGS}
     BUILD_IN_SOURCE False
     BUILD_ALWAYS True
     BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/mupen64plus-rsp-hle
@@ -134,18 +140,21 @@ ExternalProject_Add(mupen64plus-rsp-hle
     BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/mupen64plus-rsp-hle/mupen64plus-rsp-hle.${SO_EXT}
 )
 
-ExternalProject_Add(mupen64plus-rsp-parallel
-    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-rsp-parallel/
+# rsp-parallel uses unconditional SSE2 intrinsics and cannot compile on PPC
+if (NOT PPC_DYNAREC)
+    ExternalProject_Add(mupen64plus-rsp-parallel
+        SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-rsp-parallel/
 
-    INSTALL_COMMAND ""
+        INSTALL_COMMAND ""
 
-    BUILD_IN_SOURCE False
-    BUILD_ALWAYS True
-    CMAKE_ARGS -DUSE_IPO=OFF ${CMAKE_CONFIGURE_ARGS}
-    BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/mupen64plus-rsp-parallel
+        BUILD_IN_SOURCE False
+        BUILD_ALWAYS True
+        CMAKE_ARGS -DUSE_IPO=OFF ${CMAKE_CONFIGURE_ARGS}
+        BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/mupen64plus-rsp-parallel
 
-    BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/mupen64plus-rsp-parallel/mupen64plus-rsp-parallel.${SO_EXT}
-)
+        BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/mupen64plus-rsp-parallel/mupen64plus-rsp-parallel.${SO_EXT}
+    )
+endif()
 
 ExternalProject_Add(mupen64plus-input-raphnetraw
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-input-raphnetraw/
@@ -157,7 +166,7 @@ ExternalProject_Add(mupen64plus-input-raphnetraw
         SRCDIR=${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-input-raphnetraw/src
         APIDIR=${APIDIR} DEBUG=${MAKE_DEBUG}
         CC=${MAKE_CC_COMPILER} CXX=${MAKE_CXX_COMPILER}
-        OPTFLAGS=${MAKE_OPTFLAGS}
+        OPTFLAGS=${MAKE_OPTFLAGS} ${PPC_MAKE_FLAGS}
     BUILD_IN_SOURCE False
     BUILD_ALWAYS True
     BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/mupen64plus-input-raphnetraw
@@ -205,6 +214,24 @@ ExternalProject_Add(mupen64plus-video-GLideN64
     BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/mupen64plus-video-GLideN64
 
     BUILD_BYPRODUCTS ${GLIDEN64_BUILD_DIR}/plugin/${GLIDEN64_BUILD_TYPE}/mupen64plus-video-GLideN64.${SO_EXT}
+)
+
+ExternalProject_Add(mupen64plus-video-rice
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-video-rice/
+
+    CONFIGURE_COMMAND ""
+    INSTALL_COMMAND ""
+
+    BUILD_COMMAND ${MAKE_CMD} all -f ${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-video-rice/projects/unix/Makefile
+        SRCDIR=${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-video-rice/src
+        APIDIR=${APIDIR} DEBUG=${MAKE_DEBUG} POSTFIX=
+        CC=${MAKE_CC_COMPILER} CXX=${MAKE_CXX_COMPILER}
+        OPTFLAGS=${MAKE_OPTFLAGS} ${PPC_MAKE_FLAGS}
+    BUILD_IN_SOURCE False
+    BUILD_ALWAYS True
+    BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/mupen64plus-video-rice
+
+    BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/mupen64plus-video-rice/mupen64plus-video-rice.${SO_EXT}
 )
 
 ExternalProject_Add(mupen64plus-video-parallel
@@ -261,8 +288,10 @@ set(MUPEN64PLUS_PLUGIN_RSP_CXD4 ${BUILD_BYPRODUCTS} PARENT_SCOPE)
 ExternalProject_Get_property(mupen64plus-rsp-hle BUILD_BYPRODUCTS)
 set(MUPEN64PLUS_PLUGIN_RSP_HLE ${BUILD_BYPRODUCTS} PARENT_SCOPE)
 
-ExternalProject_Get_property(mupen64plus-rsp-parallel BUILD_BYPRODUCTS)
-set(MUPEN64PLUS_PLUGIN_RSP_PARALLEL ${BUILD_BYPRODUCTS} PARENT_SCOPE)
+if (NOT PPC_DYNAREC)
+    ExternalProject_Get_property(mupen64plus-rsp-parallel BUILD_BYPRODUCTS)
+    set(MUPEN64PLUS_PLUGIN_RSP_PARALLEL ${BUILD_BYPRODUCTS} PARENT_SCOPE)
+endif()
 
 ExternalProject_Get_property(mupen64plus-input-raphnetraw BUILD_BYPRODUCTS)
 set(MUPEN64PLUS_PLUGIN_INPUT_RAPHNET ${BUILD_BYPRODUCTS} PARENT_SCOPE)
@@ -275,6 +304,9 @@ endif(USE_ANGRYLION)
 ExternalProject_Get_property(mupen64plus-video-GLideN64 BUILD_BYPRODUCTS)
 set(MUPEN64PLUS_PLUGIN_GFX_GLIDEN64 ${BUILD_BYPRODUCTS} PARENT_SCOPE)
 set(MUPEN64PLUS_PLUGIN_GFX_GLIDEN64_DATA ${GLIDEN64_CUSTOM_INI} PARENT_SCOPE)
+
+ExternalProject_Get_property(mupen64plus-video-rice BUILD_BYPRODUCTS)
+set(MUPEN64PLUS_PLUGIN_GFX_RICE ${BUILD_BYPRODUCTS} PARENT_SCOPE)
 
 ExternalProject_Get_property(mupen64plus-video-parallel BUILD_BYPRODUCTS)
 set(MUPEN64PLUS_PLUGIN_GFX_PARALLEL ${BUILD_BYPRODUCTS} PARENT_SCOPE)

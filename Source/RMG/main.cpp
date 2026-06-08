@@ -169,6 +169,8 @@ int main(int argc, char **argv)
     // and ensure OpenGL 3.3 is specified by default (for wayland)
     QSurfaceFormat format = QSurfaceFormat::defaultFormat();
     format.setSwapInterval(0);
+    format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
+    format.setDepthBufferSize(24);
     format.setMajorVersion(3);
     format.setMinorVersion(3);
     QSurfaceFormat::setDefaultFormat(format);

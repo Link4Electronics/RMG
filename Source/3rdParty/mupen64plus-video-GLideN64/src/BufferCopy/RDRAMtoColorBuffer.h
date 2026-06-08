@@ -22,6 +22,11 @@ public:
 
 	static RDRAMtoColorBuffer & get();
 
+	FrameBuffer * getCurBuffer() const { return m_pCurBuffer; }
+	const std::vector<u32> & getVecAddress() const { return m_vecAddress; }
+	bool isVecAddressEmpty() const { return m_vecAddress.empty(); }
+	void clearVecAddress() { m_vecAddress.clear(); }
+
 private:
 	RDRAMtoColorBuffer();
 	RDRAMtoColorBuffer(const RDRAMtoColorBuffer &) = delete;

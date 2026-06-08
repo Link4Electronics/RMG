@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <cstdio>
 #include <cstdlib>
 #include "Config.h"
 #include "RSP.h"
@@ -124,10 +125,14 @@ bool DisplayWindow::resizeWindow()
 {
 	if (!m_bResizeWindow)
 		return false;
+	fprintf(stderr, "[RESIZE] enter: m_width=%d m_height=%d VI.w=%d VI.h=%d scaleX=%f scaleY=%f\n",
+		m_width, m_height, VI.width, VI.height, m_scaleX, m_scaleY);
 	m_drawer._destroyData();
 	if (!_resizeWindow())
 		if(!_start())
 			return false;
+	fprintf(stderr, "[RESIZE] after _resizeWindow: m_width=%d m_height=%d defaultFBO=%u\n",
+		m_width, m_height, graphics::ObjectHandle::defaultFramebuffer);
 	updateScale();
 	m_drawer._initData();
 	m_bResizeWindow = false;

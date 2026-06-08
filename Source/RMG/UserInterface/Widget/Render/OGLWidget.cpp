@@ -32,7 +32,11 @@ OGLWidget::OGLWidget(QWidget *parent)
     }
 
     this->setSurfaceType(QWindow::OpenGLSurface);
+    QSurfaceFormat fmt = QSurfaceFormat::defaultFormat();
+    fmt.setDepthBufferSize(24);
+    this->setFormat(fmt);
     this->openGLcontext = new QOpenGLContext();
+    this->openGLcontext->setFormat(fmt);
 }
 
 OGLWidget::~OGLWidget(void)
@@ -40,9 +44,13 @@ OGLWidget::~OGLWidget(void)
     this->openGLcontext->deleteLater();
 }
 
-void OGLWidget::MoveContextToThread(QThread* thread)
+void OGLWidget::MoveContextToThread(QSurfaceFormat format, QThread* thread)
 {
     this->GetContext()->doneCurrent();
+    // set the widget surface format before creating the GL context,
+    // so the window visual includes the depth buffer
+    this->setFormat(format);
+    this->GetContext()->setFormat(format);
     this->GetContext()->create();
     this->GetContext()->moveToThread(thread);
 }

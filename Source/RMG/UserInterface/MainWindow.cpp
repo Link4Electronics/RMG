@@ -2409,7 +2409,8 @@ void MainWindow::on_VidExt_Init(VidExtRenderMode renderMode)
 
 void MainWindow::on_VidExt_SetupOGL(QSurfaceFormat format, QThread* thread)
 {
-    this->ui_Widget_OpenGL->MoveContextToThread(thread);
+    // set the widget surface format BEFORE creating the GL context,
+    // so the window visual (including depth buffer) is properly configured.
     // on wayland setting the surface format
     // fails for some reason, and if we set it anyways
     // ->makeCurrent() will fail in VidExt.cpp,
@@ -2420,6 +2421,7 @@ void MainWindow::on_VidExt_SetupOGL(QSurfaceFormat format, QThread* thread)
     {
         this->ui_Widget_OpenGL->setFormat(format);
     }
+    this->ui_Widget_OpenGL->MoveContextToThread(format, thread);
 }
 
 void MainWindow::on_VidExt_SetWindowedMode(int width, int height, int bps, int flags)

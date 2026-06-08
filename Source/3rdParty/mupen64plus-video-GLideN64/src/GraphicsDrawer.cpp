@@ -2,6 +2,7 @@
 #include <string>
 #include <thread>
 #include <assert.h>
+#include <cstdio>
 #include <cmath>
 #include "Platform.h"
 #include "Graphics/Context.h"
@@ -23,6 +24,7 @@
 #include "RDP.h"
 #include "VI.h"
 #include "Log.h"
+#include <Graphics/OpenGLContext/GLFunctions.h>
 
 using namespace graphics;
 
@@ -111,19 +113,31 @@ void GraphicsDrawer::_updateCullFace() const
 void GraphicsDrawer::_updateDepthUpdate() const
 {
 	gfxContext.enableDepthWrite(gDP.otherMode.depthUpdate != 0);
+	fprintf(stderr, "[depth] _updateDepthUpdate: depthUpdate=%u\n", gDP.otherMode.depthUpdate);
 }
 
 void GraphicsDrawer::_updateDepthCompare() const
 {
+	fprintf(stderr, "[depth] _updateDepthCompare: ZBUFFER=%d depthSource=%u cycleType=%u depthCompare=%u depthMode=%u depthUpdate=%u geometryZbuf=%d\n",
+		(gSP.geometryMode & G_ZBUFFER) != 0,
+		gDP.otherMode.depthSource,
+		gDP.otherMode.cycleType,
+		gDP.otherMode.depthCompare,
+		gDP.otherMode.depthMode,
+		gDP.otherMode.depthUpdate,
+		(gSP.geometryMode & G_ZBUFFER));
 	if (config.frameBufferEmulation.N64DepthCompare != Config::dcDisable) {
 		gfxContext.enable(enable::DEPTH_TEST, false);
 		gfxContext.enableDepthWrite(false);
+		fprintf(stderr, "[depth] N64DepthCompare=dcDisable -> DEPTH_TEST OFF\n");
 	}
 	else if ((gDP.changed & (CHANGED_RENDERMODE | CHANGED_CYCLETYPE)) != 0) {
 		if (((gSP.geometryMode & G_ZBUFFER) || gDP.otherMode.depthSource == G_ZS_PRIM) && gDP.otherMode.cycleType <= G_CYC_2CYCLE) {
 			if (gDP.otherMode.depthCompare != 0) {
+				const char *modeStr;
 				switch (gDP.otherMode.depthMode) {
 				case ZMODE_INTER:
+					modeStr = "INTER";
 					gfxContext.enable(enable::POLYGON_OFFSET_FILL, false);
 					gfxContext.setDepthCompare(compare::LEQUAL);
 					break;
@@ -131,21 +145,28 @@ void GraphicsDrawer::_updateDepthCompare() const
 				case ZMODE_XLU:
 					// Max || Infront;
 					gfxContext.enable(enable::POLYGON_OFFSET_FILL, false);
-					if (gDP.otherMode.depthSource == G_ZS_PRIM && gDP.primDepth.z == 1.0f)
-						// Max
+					if (gDP.otherMode.depthSource == G_ZS_PRIM && gDP.primDepth.z == 1.0f) {
+						modeStr = "MAX(LEQUAL)";
 						gfxContext.setDepthCompare(compare::LEQUAL);
-					else
-						// Infront
+					} else {
+						modeStr = "INFRONT(LESS)";
 						gfxContext.setDepthCompare(compare::LESS);
+					}
 					break;
 				case ZMODE_DEC:
+					modeStr = "DEC";
 					gfxContext.enable(enable::POLYGON_OFFSET_FILL, true);
 					gfxContext.setDepthCompare(compare::LEQUAL);
 					break;
+				default:
+					modeStr = "UNKNOWN";
+					break;
 				}
+				fprintf(stderr, "[depth] DEPTH_TEST ON mode=%s compare=LEQUAL\n", modeStr);
 			} else {
 				gfxContext.enable(enable::POLYGON_OFFSET_FILL, false);
 				gfxContext.setDepthCompare(compare::ALWAYS);
+				fprintf(stderr, "[depth] DEPTH_TEST ON compare=ALWAYS (depthCompare=0)\n");
 			}
 
 			_updateDepthUpdate();
@@ -155,6 +176,10 @@ void GraphicsDrawer::_updateDepthCompare() const
 				gfxContext.setClampMode(graphics::ClampMode::ClippingEnabled);
 		} else {
 			gfxContext.enable(enable::DEPTH_TEST, false);
+			fprintf(stderr, "[depth] DEPTH_TEST OFF (cond=false: ZBUFFER=%d depthSource=%u cycleType=%u)\n",
+				(gSP.geometryMode & G_ZBUFFER) != 0,
+				gDP.otherMode.depthSource,
+				gDP.otherMode.cycleType);
 			if (!GBI.isNoN())
 				gfxContext.setClampMode(graphics::ClampMode::NoClipping);
 		}
@@ -873,6 +898,11 @@ void GraphicsDrawer::drawTriangles()
 
 	if (config.frameBufferEmulation.enable != 0) {
 		f32 maxY;
+		// DEBUG: clear depth buffer before each draw to see if stale Z values hide 3D
+		glClear(GL_DEPTH_BUFFER_BIT);
+		fprintf(stderr, "[depth] drawTriangles: verts=%u elements=%u depthCompare=%u depthUpdate=%u\n",
+			triangles.num, triangles.maxElement,
+			gDP.otherMode.depthCompare, gDP.otherMode.depthUpdate);
 		if (config.generalEmulation.enableClipping != 0) {
 			maxY = renderAndDrawTriangles(triangles.vertices.data(), triangles.elements.data(), triangles.num, m_bFlatColors, m_statistics);
 		} else {
@@ -1241,7 +1271,7 @@ bool texturedRectDepthBufferCopy(const GraphicsDrawer::TexturedRectParams & _par
 		u16 * pSrc = reinterpret_cast<u16*>(TMEM) + _params.s/32;
 		u16 *pDst = reinterpret_cast<u16*>(RDRAM + gDP.colorImage.address);
 		for (u32 x = 0; x < width; ++x)
-			pDst[(ulx + x) ^ 1] = swapword(pSrc[x]);
+			pDst[E16_IDX(ulx + x)] = swapword(pSrc[x]);
 
 		return true;
 	}
@@ -1322,7 +1352,7 @@ bool texturedRectPaletteMod(const GraphicsDrawer::TexturedRectParams & _params)
 	u16 * src = reinterpret_cast<u16*>(&TMEM[256]);
 	u16 * dst = reinterpret_cast<u16*>(RDRAM + gDP.colorImage.address);
 	for (u32 i = 0; i < 16; ++i)
-		dst[i ^ 1] = (src[i << 2] & 0x100) ? prim16 : env16;
+		dst[E16_IDX(i)] = (src[i << 2] & 0x100) ? prim16 : env16;
 	return true;
 }
 
@@ -1944,6 +1974,8 @@ void GraphicsDrawer::_initStates()
 	gfxContext.setViewport(0, static_cast<s32>(wnd.getHeightOffset()),
 						   static_cast<s32>(wnd.getScreenWidth()), static_cast<s32>(wnd.getScreenHeight()));
 
+	fprintf(stderr, "[_initStates] clear to BLACK  defaultFBO=%u\n",
+		graphics::ObjectHandle::defaultFramebuffer);
 	gfxContext.clearColorBuffer(0.0f, 0.0f, 0.0f, 0.0f);
 
 	srand(static_cast<u32>(time(nullptr)));

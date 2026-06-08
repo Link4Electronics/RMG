@@ -46,7 +46,12 @@ static QVector<const char*> l_VulkanExtensionList;
 
 static bool VidExt_OglSetup(void)
 {
+    fprintf(stderr, "OGLSETUP: reqDepth=%d defaultFormatDepth=%d widgetFormatDepth=%d\n", l_SurfaceFormat.depthBufferSize(), QSurfaceFormat::defaultFormat().depthBufferSize(), (*l_OGLWidget)->format().depthBufferSize());
     l_EmuThread->on_VidExt_SetupOGL(l_SurfaceFormat, QThread::currentThread());
+
+    fprintf(stderr, "OGLSETUP: after create, ctxFormatDepth=%d widgetFormatDepth=%d\n",
+        (*l_OGLWidget)->GetContext()->format().depthBufferSize(),
+        (*l_OGLWidget)->format().depthBufferSize());
 
     while (!(*l_OGLWidget)->isVisible())
     {
@@ -80,6 +85,8 @@ static m64p_error VidExt_InitWithRenderMode(m64p_render_mode RenderMode)
 {
     l_RenderMode = RenderMode;
     l_RenderThread = QThread::currentThread();
+
+    fprintf(stderr, "VidExt_InitWithRenderMode: OpenGL, platform=%s\n", QGuiApplication::platformName().toLatin1().constData());
 
     if (RenderMode == M64P_RENDER_OPENGL)
     {
@@ -117,7 +124,7 @@ static m64p_error VidExt_Quit(void)
     if (l_RenderMode == M64P_RENDER_OPENGL)
     {
         // move OpenGL context back to the GUI thread
-        (*l_OGLWidget)->MoveContextToThread(QApplication::instance()->thread());
+        (*l_OGLWidget)->MoveContextToThread(l_SurfaceFormat, QApplication::instance()->thread());
     }
     else
     {
@@ -224,6 +231,8 @@ static m64p_error VidExt_GLSetAttr(m64p_GLattr Attr, int Value)
     case M64P_GL_BUFFER_SIZE:
         break;
     case M64P_GL_DEPTH_SIZE:
+        if (Value == 0)
+            Value = 16;
         l_SurfaceFormat.setDepthBufferSize(Value);
         break;
     case M64P_GL_RED_SIZE:
@@ -343,18 +352,85 @@ static m64p_error VidExt_GLSwapBuf(void)
 {
     if (l_RenderMode != M64P_RENDER_OPENGL)
     {
+        fprintf(stderr, "VidExt_GLSwapBuf: invalid render mode\n");
         return M64ERR_INVALID_STATE;
     }
 
     if (l_RenderThread != QThread::currentThread())
     {
+        fprintf(stderr, "VidExt_GLSwapBuf: wrong thread (render on main)\n");
         return M64ERR_UNSUPPORTED;
+    }
+
+    static unsigned long swapCount = 0;
+    swapCount++;
+
+    GLint curFbo = 0, readFbo = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &curFbo);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readFbo);
+    GLenum gle = glGetError();
+
+    char buf[512];
+
+    // pre-swap: clear color + pixel samples
+    GLfloat clearColor[4];
+    glGetFloatv(GL_COLOR_CLEAR_VALUE, clearColor);
+    gle = glGetError();
+    snprintf(buf, sizeof(buf), "VidExt: swap=%lu pre-swap FBO=%d/%d clear=(%.3f,%.3f,%.3f,%.3f) gle=0x%04X",
+             swapCount, curFbo, readFbo, clearColor[0], clearColor[1], clearColor[2], clearColor[3], gle);
+    fprintf(stderr, "%s\n", buf);
+
+    // read pixel samples: center, top-left(10,10), bottom-right(w-10, h-10)
+    GLint vp[4];
+    glGetIntegerv(GL_VIEWPORT, vp);
+    gle = glGetError();
+    int sx = vp[0], sy = vp[1], sw = vp[2], sh = vp[3];
+    int samples[][2] = {{sx + sw/2, sy + sh/2}, {sx + 10, sy + 10}, {sx + sw - 10, sy + sh - 10}};
+    const char *labels[] = {"center", "tl", "br"};
+    for (int i = 0; i < 3; i++)
+    {
+        int px = samples[i][0], py = samples[i][1];
+        GLubyte pix[4] = {0,0,0,0};
+        glReadPixels(px, py, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pix);
+        GLfloat depth = 2.0f;
+        glReadPixels(px, py, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
+        // ignore any read error from out-of-bounds
+        GLenum e = glGetError();
+        if (e == GL_NO_ERROR)
+        {
+            snprintf(buf, sizeof(buf), "VidExt: swap=%lu pre-swap pixel[%s]@(%d,%d) RGBA=(%u,%u,%u,%u) depth=%.4f",
+                     swapCount, labels[i], px, py, pix[0], pix[1], pix[2], pix[3], depth);
+            fprintf(stderr, "%s\n", buf);
+        }
     }
 
     OnScreenDisplayRender();
 
     (*l_OGLWidget)->GetContext()->swapBuffers((*l_OGLWidget));
     (*l_OGLWidget)->GetContext()->makeCurrent((*l_OGLWidget));
+
+    // post-swap: FBO + pixel samples again
+    GLint afterFbo = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &afterFbo);
+    GLenum gle2 = glGetError();
+    snprintf(buf, sizeof(buf), "VidExt: swap=%lu post-swap FBO=%d gle=0x%04X", swapCount, afterFbo, gle2);
+    fprintf(stderr, "%s\n", buf);
+
+    for (int i = 0; i < 3; i++)
+    {
+        int px = samples[i][0], py = samples[i][1];
+        GLubyte pix[4] = {0,0,0,0};
+        glReadPixels(px, py, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pix);
+        GLfloat depth = 2.0f;
+        glReadPixels(px, py, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
+        GLenum e = glGetError();
+        if (e == GL_NO_ERROR)
+        {
+            snprintf(buf, sizeof(buf), "VidExt: swap=%lu post-swap pixel[%s]@(%d,%d) RGBA=(%u,%u,%u,%u) depth=%.4f",
+                     swapCount, labels[i], px, py, pix[0], pix[1], pix[2], pix[3], depth);
+            fprintf(stderr, "%s\n", buf);
+        }
+    }
 
     return M64ERR_SUCCESS;
 }

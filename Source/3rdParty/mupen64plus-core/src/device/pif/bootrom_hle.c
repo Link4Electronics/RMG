@@ -29,6 +29,7 @@
 #include "device/r4300/r4300_core.h"
 #include "device/rcp/ai/ai_controller.h"
 #include "device/rcp/pi/pi_controller.h"
+#include "device/rcp/ri/ri_controller.h"
 #include "device/rcp/rsp/rsp_core.h"
 #include "device/rcp/si/si_controller.h"
 #include "device/rcp/vi/vi_controller.h"
@@ -144,6 +145,13 @@ void pif_bootrom_hle_execute(struct r4300_core* r4300)
     r4300_gpregs[11] = INT64_C(0xffffffffa4000040); /* t3 */
     r4300_gpregs[29] = INT64_C(0xffffffffa4001ff0); /* sp */
     r4300_gpregs[31] = INT64_C(0xffffffffa4001550); /* ra */
+
+    /* Signal RDRAM initialization complete.
+     * The IPL3 CIC check at 0xA4000058 reads RI_SELECT_REG and loops
+     * until non-zero (real PIF bootrom initializes RDRAM via the RCP).
+     * The HLE skips RDRAM init, so we pre-set RI_SELECT to pass the check. */
+    r4300_write_aligned_word(r4300, R4300_KSEG1 + MM_RI_REGS + 4*RI_SELECT_REG,
+                             0x01, ~UINT32_C(0));
 
     /* XXX: should prepare execution of IPL3 in DMEM here :
      * e.g. jump to 0xa4000040 */

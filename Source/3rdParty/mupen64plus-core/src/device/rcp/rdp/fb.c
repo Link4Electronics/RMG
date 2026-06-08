@@ -195,10 +195,15 @@ void protect_framebuffers(struct fb* fb)
     struct mem_mapping fb_mapping = { 0, 0, M64P_MEM_RDRAM, { fb, RW(rdram_fb) } };
 
     /* check API support */
-    if (!(gfx.fBGetFrameBufferInfo && gfx.fBRead && gfx.fBWrite)
-        || fb->r4300->emumode == EMUMODE_DYNAREC /* Dynarecs currently miss some of the read/writes needed for FBInfo */) {
+    if (!(gfx.fBGetFrameBufferInfo && gfx.fBRead && gfx.fBWrite))
         return;
-    }
+
+    /* Dynarecs (x86/ARM) may bypass memory handlers in compiled code and miss FBInfo read/writes.
+     * PPC dynarec always goes through C memory handlers, so it can use FBInfo safely. */
+#ifndef PPC_DYNAREC
+    if (fb->r4300->emumode == EMUMODE_DYNAREC)
+        return;
+#endif
 
     /* ask fb info to gfx plugin */
     gfx.fBGetFrameBufferInfo(fb->infos);
@@ -228,7 +233,7 @@ void protect_framebuffers(struct fb* fb)
         /* disable dynarec "fast memory" code generation to avoid direct memory accesses */
         if (fb->once) {
             fb->once = 0;
-#ifndef NEW_DYNAREC
+#if !defined(NEW_DYNAREC) && !defined(PPC_DYNAREC)
             fb->r4300->recomp.fast_memory = 0;
 #endif
 

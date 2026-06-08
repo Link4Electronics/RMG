@@ -12,6 +12,8 @@ option(VRU              "Enables VRU support in RMG-Input" ON)
 option(USE_CCACHE       "Enables usage of ccache when ccache has been found" ON)
 option(NO_ASM           "Disables the usage of assembly in the mupen64plus-core" OFF)
 option(USE_ANGRYLION    "Enables building angrylion-rdp-plus which uses a non-GPL compliant license" OFF)
+option(PPC_DYNAREC      "Enables PowerPC64 MIPS-to-PPC dynamic recompiler" OFF)
+option(DYNAREC          "Enables dynamic recompiler (auto-detected for supported architectures)" OFF)
 
 project(RMG)
 
@@ -159,10 +161,12 @@ install(FILES ${MUPEN64PLUS_PLUGIN_RSP_HLE}
     DESTINATION ${PLUGIN_INSTALL_PATH}/RSP
     PERMISSIONS ${LIB_PERMISSIONS}
 )
-install(FILES ${MUPEN64PLUS_PLUGIN_RSP_PARALLEL}
-    DESTINATION ${PLUGIN_INSTALL_PATH}/RSP
-    PERMISSIONS ${LIB_PERMISSIONS}
-)
+if (NOT PPC_DYNAREC)
+    install(FILES ${MUPEN64PLUS_PLUGIN_RSP_PARALLEL}
+        DESTINATION ${PLUGIN_INSTALL_PATH}/RSP
+        PERMISSIONS ${LIB_PERMISSIONS}
+    )
+endif()
 install(FILES ${MUPEN64PLUS_PLUGIN_INPUT_RAPHNET}
     DESTINATION ${PLUGIN_INSTALL_PATH}/Input
     PERMISSIONS ${LIB_PERMISSIONS}
@@ -179,6 +183,10 @@ install(FILES ${MUPEN64PLUS_PLUGIN_GFX_GLIDEN64}
 )
 install(FILES ${MUPEN64PLUS_PLUGIN_GFX_GLIDEN64_DATA}
     DESTINATION ${DATA_INSTALL_PATH}
+)
+install(FILES ${MUPEN64PLUS_PLUGIN_GFX_RICE}
+    DESTINATION ${PLUGIN_INSTALL_PATH}/GFX
+    PERMISSIONS ${LIB_PERMISSIONS}
 )
 install(FILES ${MUPEN64PLUS_PLUGIN_GFX_PARALLEL}
     DESTINATION ${PLUGIN_INSTALL_PATH}/GFX

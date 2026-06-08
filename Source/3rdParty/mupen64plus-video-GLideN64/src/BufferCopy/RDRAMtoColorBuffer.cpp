@@ -1,5 +1,6 @@
 #include "RDRAMtoColorBuffer.h"
 
+#include <cstdio>
 #include <FrameBufferInfo.h>
 #include <FrameBuffer.h>
 #include <Combiner.h>
@@ -29,6 +30,8 @@ RDRAMtoColorBuffer & RDRAMtoColorBuffer::get()
 
 void RDRAMtoColorBuffer::init()
 {
+	fprintf(stderr, "[RDRAMtoCB::init] BEFORE: m_pCurBuffer=%p vec=%zu\n",
+		(void*)m_pCurBuffer, m_vecAddress.size());
 	const FramebufferTextureFormats & fbTexFormats = gfxContext.getFramebufferTextureFormats();
 
 	m_pTexture = textureCache().addFrameBufferTexture(textureTarget::TEXTURE_2D);
@@ -70,6 +73,8 @@ void RDRAMtoColorBuffer::init()
 
 void RDRAMtoColorBuffer::destroy()
 {
+	fprintf(stderr, "[RDRAMtoCB::destroy] BEFORE: m_pCurBuffer=%p vec=%zu\n",
+		(void*)m_pCurBuffer, m_vecAddress.size());
 	if (m_pTexture != nullptr) {
 		textureCache().removeFrameBufferTexture(m_pTexture);
 		m_pTexture = nullptr;
@@ -108,7 +113,7 @@ bool _copyBufferFromRdram(u32 _address, u32* _dst, u32(*converter)(TSrc _c, bool
 	const u32 y1 = _y0 + _height;
 	for (u32 y = _y0; y < y1; ++y) {
 		for (u32 x = _x0; x < _width; ++x) {
-			idx = (x + y *_width) ^ _xor;
+			idx = (x + y *_width) ^ E_XOR(_xor);
 			if (idx >= bound)
 				break;
 			col = src[idx];
@@ -142,7 +147,7 @@ bool _copyPixelsFromRdram(u32 _address, const std::vector<u32> & _vecAddress, u3
 			return false;
 		col = src[idx];
 		summ += col;
-		_dst[(w + h * _width) ^ _xor] = converter(col, _fullAlpha);
+		_dst[(w + h * _width) ^ E_XOR(_xor)] = converter(col, _fullAlpha);
 	}
 
 	return summ != 0;
@@ -159,7 +164,11 @@ u32 RGBA16ToABGR32(u16 col, bool _fullAlpha)
 		a = 0xFF;
 	else
 		a = (col & 1) > 0 ? 0xFF : 0U;
+#if defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+	return ((r << 24) | (g << 16) | (b << 8) | a);
+#else
 	return ((a << 24) | (b << 16) | (g << 8) | r);
+#endif
 }
 
 static
@@ -173,7 +182,11 @@ u32 RGBA32ToABGR32(u32 col, bool _fullAlpha)
 		a = 0xFF;
 	else
 		a = col & 0xFF;
+#if defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+	return ((r << 24) | (g << 16) | (b << 8) | a);
+#else
 	return ((a << 24) | (b << 16) | (g << 8) | r);
+#endif
 }
 
 void RDRAMtoColorBuffer::_copyFromRDRAM(u32 _height, bool _fullAlpha)
@@ -182,6 +195,8 @@ void RDRAMtoColorBuffer::_copyFromRDRAM(u32 _height, bool _fullAlpha)
 	const u32 address = m_pCurBuffer->m_startAddress;
 	const u32 width = m_pCurBuffer->m_width;
 	const u32 height = _height;
+	fprintf(stderr, "[_copyFromRDRAM] addr=0x%08x w=%d h=%d vec=%zu FBO=%u\n",
+		address, width, height, m_vecAddress.size(), m_pCurBuffer->m_FBO);
 
 	const u32 x0 = 0;
 	const u32 y0 = 0;
@@ -294,6 +309,9 @@ void RDRAMtoColorBuffer::_copyFromRDRAM(u32 _height, bool _fullAlpha)
 
 void RDRAMtoColorBuffer::copyFromRDRAM(u32 _address, bool _bCFB)
 {
+	fprintf(stderr, "[copyFromRDRAM(u32)] entry: _addr=0x%08x bCFB=%d m_pCurBuffer=%p vec.sz=%zu findBuf=%p\n",
+		_address, _bCFB, (void*)m_pCurBuffer, m_vecAddress.size(),
+		(void*)frameBufferList().findBuffer(_address));
 	if (m_pCurBuffer == nullptr) {
 		if (_bCFB || (config.frameBufferEmulation.copyFromRDRAM != 0 && !FBInfo::fbInfo.isSupported()))
 			m_pCurBuffer = frameBufferList().findBuffer(_address);

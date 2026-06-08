@@ -142,44 +142,88 @@ struct gDPInfo
 		{
 			struct
 			{
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+// PPC64 BE: MSB-first bitfield packing, fields declared within unsigned int
+// storage units. With 32-bit unsigned int fields, the first 32 bits of fields
+// go to bytes 0-3 (= l in {l, h} union) and the next 32 bits go to bytes 4-7
+// (= h). gDPSetOtherMode writes h=mode0, l=mode1, so mode1 fields must be
+// declared first (→ l = mode1) and mode0 second (→ h = mode0).
+// Within each word, fields are declared in reverse bit order (last field on LE
+// becomes first on BE, i.e., MSB gets first-declared).
+
+// mode1 (low word → first-declared → l):
+				unsigned int c1_m1a : 2;
+				unsigned int c2_m1a : 2;
+				unsigned int c1_m1b : 2;
+				unsigned int c2_m1b : 2;
+				unsigned int c1_m2a : 2;
+				unsigned int c2_m2a : 2;
+				unsigned int c1_m2b : 2;
+				unsigned int c2_m2b : 2;
+				unsigned int textureEdge : 1;
+				unsigned int forceBlender : 1;
+				unsigned int alphaCvgSel : 1;
+				unsigned int cvgXAlpha : 1;
+				unsigned int depthMode : 2;
+				unsigned int cvgDest : 2;
+				unsigned int colorOnCvg : 1;
+				unsigned int imageRead : 1;
+				unsigned int depthUpdate : 1;
+				unsigned int depthCompare : 1;
+				unsigned int AAEnable : 1;
+				unsigned int depthSource : 1;
+				unsigned int alphaCompare : 2;
+
+// mode0 (high word → second-declared → h):
+				unsigned int pad : 8;
+				unsigned int pipelineMode : 1;
+				unsigned int unusedColorDither : 1;
+				unsigned int cycleType : 2;
+				unsigned int texturePersp : 1;
+				unsigned int textureDetail : 2;
+				unsigned int textureLOD : 1;
+				unsigned int textureLUT : 2;
+				unsigned int textureFilter : 2;
+				unsigned int bi_lerp0 : 1;
+				unsigned int bi_lerp1 : 1;
+				unsigned int convert_one : 1;
+				unsigned int combineKey : 1;
+				unsigned int colorDither : 2;
+				unsigned int alphaDither : 2;
+				unsigned int blendMask : 4;
+#else
+// LE (LSB-first): fields in natural N64 bit order
 				unsigned int alphaCompare : 2;
 				unsigned int depthSource : 1;
 
-//				struct
-//				{
-					unsigned int AAEnable : 1;
-					unsigned int depthCompare : 1;
-					unsigned int depthUpdate : 1;
-					unsigned int imageRead : 1;
-					unsigned int colorOnCvg : 1;
+				unsigned int AAEnable : 1;
+				unsigned int depthCompare : 1;
+				unsigned int depthUpdate : 1;
+				unsigned int imageRead : 1;
+				unsigned int colorOnCvg : 1;
 
-					unsigned int cvgDest : 2;
-					unsigned int depthMode : 2;
+				unsigned int cvgDest : 2;
+				unsigned int depthMode : 2;
 
-					unsigned int cvgXAlpha : 1;
-					unsigned int alphaCvgSel : 1;
-					unsigned int forceBlender : 1;
-					unsigned int textureEdge : 1;
-//				} renderMode;
+				unsigned int cvgXAlpha : 1;
+				unsigned int alphaCvgSel : 1;
+				unsigned int forceBlender : 1;
+				unsigned int textureEdge : 1;
 
-//				struct
-//				{
-					unsigned int c2_m2b : 2;
-					unsigned int c1_m2b : 2;
-					unsigned int c2_m2a : 2;
-					unsigned int c1_m2a : 2;
-					unsigned int c2_m1b : 2;
-					unsigned int c1_m1b : 2;
-					unsigned int c2_m1a : 2;
-					unsigned int c1_m1a : 2;
-//				} blender;
+				unsigned int c2_m2b : 2;
+				unsigned int c1_m2b : 2;
+				unsigned int c2_m2a : 2;
+				unsigned int c1_m2a : 2;
+				unsigned int c2_m1b : 2;
+				unsigned int c1_m1b : 2;
+				unsigned int c2_m1a : 2;
+				unsigned int c1_m1a : 2;
 
 				unsigned int blendMask : 4;
 				unsigned int alphaDither : 2;
 				unsigned int colorDither : 2;
 
 				unsigned int combineKey : 1;
-//				unsigned int textureConvert : 3;
 				unsigned int convert_one : 1;
 				unsigned int bi_lerp1 : 1;
 				unsigned int bi_lerp0 : 1;
@@ -191,11 +235,11 @@ struct gDPInfo
 				unsigned int textureDetail : 2;
 				unsigned int texturePersp : 1;
 				unsigned int cycleType : 2;
-				unsigned int unusedColorDither : 1; // unsupported
+				unsigned int unusedColorDither : 1;
 				unsigned int pipelineMode : 1;
 
 				unsigned int pad : 8;
-
+#endif
 			};
 
 			u64			_u64;

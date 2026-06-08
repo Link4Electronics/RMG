@@ -57,6 +57,8 @@ void VI_UpdateSize()
 	VI.real_height = vEnd > vStart ? (((vEnd - vStart) >> 1) * vScale) >> 10 : 0;
 	VI.width = *REG.VI_WIDTH;
 	VI.interlaced = (*REG.VI_STATUS & VI_STATUS_SERRATE_ENABLED) != 0;
+	fprintf(stderr, "[VI_UpdateSize] width=%d real_height=%d interlaced=%d PAL=%d vScale=%d vStart=%d vEnd=%d\n",
+		VI.width, VI.real_height, VI.interlaced, VI.PAL, vScale, vStart, vEnd);
 
 	if (VI.interlaced) {
 		f32 fullWidth = 640.0f;

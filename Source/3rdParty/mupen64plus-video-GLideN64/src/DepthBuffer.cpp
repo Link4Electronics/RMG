@@ -4,6 +4,7 @@
 #include <malloc.h>
 #endif
 #include <assert.h>
+#include <cstdio>
 #include "Combiner.h"
 #include "FrameBuffer.h"
 #include "DepthBuffer.h"
@@ -495,9 +496,11 @@ void DepthBufferList::clearBuffer()
 
 	//if (pColorBuffer->m_pTexture->realWidth == pDepthBuffer->m_pDepthImageZTexture->realWidth)
 	{
+		fprintf(stderr, "[DepthClear] ZClearFBO=%u -> RED (1,0,0,0)\n", pDepthBuffer->m_ZTextureClearFBO);
 		gfxContext.bindFramebuffer(bufferTarget::DRAW_FRAMEBUFFER, pDepthBuffer->m_ZTextureClearFBO);
 		gfxContext.clearColorBuffer(1.0f, 0.0f, 0.0f, 0.0f);
 
+		fprintf(stderr, "[DepthClear] DeltaZClearFBO=%u -> RED (1,0,0,0)\n", pDepthBuffer->m_DeltaZTextureClearFBO);
 		gfxContext.bindFramebuffer(bufferTarget::DRAW_FRAMEBUFFER, pDepthBuffer->m_DeltaZTextureClearFBO);
 		gfxContext.clearColorBuffer(1.0f, 0.0f, 0.0f, 0.0f);
 	}

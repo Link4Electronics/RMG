@@ -36,8 +36,13 @@
 
 /* XXX: this is an abuse of the Zilmar Spec normally this value is reserved */
 enum {
+#if defined(M64P_BIG_ENDIAN)
+    PAK_SWITCH_BUTTON = 0x400000,
+    GB_CART_SWITCH_BUTTON = 0x800000
+#else
     PAK_SWITCH_BUTTON = 0x4000,
     GB_CART_SWITCH_BUTTON = 0x8000
+#endif
 };
 
 /* Pak switching delay

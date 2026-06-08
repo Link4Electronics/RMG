@@ -419,6 +419,33 @@ extern u32 G_TRISTRIP, G_TRIFAN, G_LIGHTTORDP, G_RELSEGMENT;
 
 typedef struct
 {
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	s16 x;
+	s16 y;
+
+	s16 z;
+	u16 flag;
+
+	s16 s;
+	s16 t;
+
+	union {
+		struct
+		{
+			u8 r;
+			u8 g;
+			u8 b;
+			u8 a;
+		} color;
+		struct
+		{
+			s8 x;
+			s8 y;
+			s8 z;
+			s8 a;
+		} normal;
+	};
+#else
 	s16 y;
 	s16 x;
 
@@ -444,14 +471,22 @@ typedef struct
 			s8 x;	//r
 		} normal;
 	};
+#endif
 } Vertex;
 
 typedef struct
 {
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	s16 x, y;
+	s16 z;
+	u16	ci;
+	s16 s, t;
+#else
 	s16 y, x;
 	u16	ci;
 	s16 z;
 	s16 t, s;
+#endif
 } PDVertex;
 
 typedef struct
@@ -464,16 +499,28 @@ typedef struct
 
 typedef struct
 {
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	s16 x, y;
+	s16 z;
+	u16 flag;
+#else
 	s16 y, x;
 	u16 flag;
 	s16 z;
+#endif
 } SWVertex;
 
 struct Light
 {
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	u8 r, g, b, type;
+	u8 r2, g2, b2, pad1;
+	s8 x, y, z, pad2;
+#else
 	u8 type, b, g, r;
 	u8 pad1, b2, g2, r2;
 	s8 pad2, z, y, x;
+#endif
 };
 
 // GBI commands

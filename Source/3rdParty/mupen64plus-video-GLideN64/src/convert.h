@@ -17,7 +17,11 @@ void DWordInterleaveWrap(u32 *src, u32 srcIdx, u32 srcMask, u32 numQWords);
 
 inline u16 swapword( u16 value )
 {
-#ifdef WIN32_ASM
+#if defined(__BIG_ENDIAN__)
+	// On big-endian hosts, RDRAM/TMEM stores u16 values in native N64 byte order.
+	// No byte swap needed — value is already correct.
+	return value;
+#elif defined(WIN32_ASM)
 	__asm
 	{
 		mov		ax, word ptr [value]
@@ -25,7 +29,7 @@ inline u16 swapword( u16 value )
 	}
 #else // WIN32_ASM
 	return (value << 8) | (value >> 8);
-#endif // WIN32_ASM
+#endif
 }
 
 inline u16 RGBA8888_RGBA4444( u32 color )
@@ -97,7 +101,11 @@ inline u32 RGBA5551_RGBA8888( u16 color )
 	g = Five2Eight[(color >> 6) & 0x001f];
 	b = Five2Eight[(color >> 1) & 0x001f];
 	a = One2Eight [(color     ) & 0x0001];
+#if defined(__BIG_ENDIAN__)
+	return (r << 24) | (g << 16) | (b << 8) | a;
+#else
 	return (a << 24) | (b << 16) | (g << 8) | r;
+#endif
 #endif // WIN32_ASM
 }
 
@@ -134,7 +142,11 @@ inline u32 IA88_RGBA8888( u16 color )
 	// ok
 	u8 a = color >> 8;
 	u8 i = color & 0x00FF;
+#if defined(__BIG_ENDIAN__)
+	return (i << 24) | (i << 16) | (i << 8) | a;
+#else
 	return (a << 24) | (i << 16) | (i << 8) | i;
+#endif
 #endif // WIN32_ASM
 }
 
@@ -206,7 +218,11 @@ inline u32 IA44_RGBA8888( u8 color )
 #else // WIN32_ASM
 	u8 i = Four2Eight[color >> 4];
 	u8 a = Four2Eight[color & 0x0F];
+#if defined(__BIG_ENDIAN__)
+	return (i << 24) | (i << 16) | (i << 8) | a;
+#else
 	return (a << 24) | (i << 16) | (i << 8) | i;
+#endif
 #endif // WIN32_ASM
 }
 
@@ -265,7 +281,11 @@ inline u32 IA31_RGBA8888( u8 color )
 #else // WIN32_ASM
 	u8 i = Three2Eight[color >> 1];
 	u8 a = One2Eight[color & 0x01];
+#if defined(__BIG_ENDIAN__)
+	return (i << 24) | (i << 16) | (i << 8) | a;
+#else
 	return (a << 24) | (i << 16) | (i << 8) | i;
+#endif
 #endif // WIN32_ASM
 }
 
