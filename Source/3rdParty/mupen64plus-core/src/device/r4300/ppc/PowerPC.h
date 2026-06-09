@@ -563,22 +563,22 @@ typedef unsigned int PowerPC_instr;
       PPC_SET_BI    (ppc, (bi)); }
 
 #define GEN_BNE(ppc,cr,dst,aa,lk) \
-    GEN_BC(ppc,dst,aa,lk,4,cr*4+2)
+    GEN_BC(ppc,dst,aa,lk,0x10,cr*4+2)
 
 #define GEN_BEQ(ppc,cr,dst,aa,lk) \
-    GEN_BC(ppc,dst,aa,lk,12,cr*4+2)
+    GEN_BC(ppc,dst,aa,lk,0x12,cr*4+2)
 
 #define GEN_BGT(ppc,cr,dst,aa,lk) \
-    GEN_BC(ppc,dst,aa,lk,12,cr*4+1)
+    GEN_BC(ppc,dst,aa,lk,0x12,cr*4+1)
 
 #define GEN_BLE(ppc,cr,dst,aa,lk) \
-    GEN_BC(ppc,dst,aa,lk,4,cr*4+1)
+    GEN_BC(ppc,dst,aa,lk,0x10,cr*4+1)
 
 #define GEN_BGE(ppc,cr,dst,aa,lk) \
-    GEN_BC(ppc,dst,aa,lk,4,cr*4+0)
+    GEN_BC(ppc,dst,aa,lk,0x10,cr*4+0)
 
 #define GEN_BLT(ppc,cr,dst,aa,lk) \
-    GEN_BC(ppc,dst,aa,lk,12,cr*4+0)
+    GEN_BC(ppc,dst,aa,lk,0x12,cr*4+0)
 
 #define GEN_ADDI(ppc,rd,ra,immed) \
     { ppc = NEW_PPC_INSTR(); \
@@ -1122,10 +1122,10 @@ typedef unsigned int PowerPC_instr;
       PPC_SET_BI    (ppc, bi); }
 
 #define GEN_BNELR(ppc,cr,lk) \
-    GEN_BCLR(ppc,lk,4,cr*4+2)
+    GEN_BCLR(ppc,lk,0x10,cr*4+2)
 
 #define GEN_BLELR(ppc,cr,lk) \
-    GEN_BCLR(ppc,lk,4,cr*4+1)
+    GEN_BCLR(ppc,lk,0x10,cr*4+1)
 
 #define GEN_ANDIS(ppc,rd,ra,immed) \
     { ppc = NEW_PPC_INSTR(); \

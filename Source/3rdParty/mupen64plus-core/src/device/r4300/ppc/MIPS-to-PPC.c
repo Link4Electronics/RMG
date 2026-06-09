@@ -166,13 +166,13 @@ static int branch(int offset, condition cond, int link, int likely){
     int likely_id;
     int bo, bi, nbo;
     switch(cond){
-        case EQ:  bo = 0xc; nbo = 0x4; bi = 18; break;
-        case NE:  bo = 0x4; nbo = 0xc; bi = 18; break;
-        case LT:  bo = 0xc; nbo = 0x4; bi = 16; break;
-        case GE:  bo = 0x4; nbo = 0xc; bi = 16; break;
-        case GT:  bo = 0xc; nbo = 0x4; bi = 17; break;
-        case LE:  bo = 0x4; nbo = 0xc; bi = 17; break;
-        default:  bo = 0x14; nbo = 0x4; bi = 19; break;
+        case EQ:  bo = 0x12; nbo = 0x12; bi = 18; break;
+        case NE:  bo = 0x10; nbo = 0x10; bi = 18; break;
+        case LT:  bo = 0x12; nbo = 0x12; bi = 16; break;
+        case GE:  bo = 0x10; nbo = 0x10; bi = 16; break;
+        case GT:  bo = 0x12; nbo = 0x12; bi = 17; break;
+        case LE:  bo = 0x10; nbo = 0x10; bi = 17; break;
+        default:  bo = 0x14; nbo = 0x14; bi = 19; break;
     }
 
     flushRegisters();
