@@ -170,6 +170,8 @@ static void genJumpPad(void)
     EMIT_STW(0, 0, 3);
     EMIT_LIS(3, (get_src_pc() + 4) >> 16);
     EMIT_ORI(3, 3, get_src_pc() + 4);
+    EMIT_LD(0, DYNAOFF_LR, 1);
+    EMIT_MTLR(0);
     EMIT_BLR(0);
 }
 
