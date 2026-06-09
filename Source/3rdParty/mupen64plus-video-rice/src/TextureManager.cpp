@@ -546,8 +546,8 @@ bool lastEntryModified = false;
 
 TxtrCacheEntry * CTextureManager::GetTexture(TxtrInfo * pgti, bool fromTMEM, bool doCRCCheck, bool AutoExtendTexture)
 {
-    fprintf(stderr, "RICE: GetTexture fmt=%d sz=%d addr=0x%08X w=%d h=%d pal=0x%08X\n",
-        pgti->Format, pgti->Size, pgti->dwAddr, pgti->dwWidth, pgti->dwHeight, pgti->dwPalAddr);
+    fprintf(stderr, "RICE: GetTexture fmt=%d sz=%d addr=0x%08X w=%d h=%d pal=%p\n",
+        pgti->Format, pgti->Size, pgti->Address, pgti->WidthToLoad, pgti->HeightToLoad, pgti->PalAddress);
     fflush(stderr);
     TxtrCacheEntry *pEntry;
 
