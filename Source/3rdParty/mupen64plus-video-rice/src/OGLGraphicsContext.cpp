@@ -77,6 +77,13 @@ bool COGLGraphicsContext::Initialize(uint32 dwWidth, uint32 dwHeight, BOOL bWind
     /* hard-coded attribute values */
     const int iDOUBLEBUFFER = 1;
 
+    /* Request GL 2.1 compatibility profile */
+    CoreVideo_GL_SetAttribute(M64P_GL_CONTEXT_MAJOR_VERSION, 2);
+    CoreVideo_GL_SetAttribute(M64P_GL_CONTEXT_MINOR_VERSION, 1);
+#ifndef USE_GLES
+    CoreVideo_GL_SetAttribute(M64P_GL_CONTEXT_PROFILE_MASK, M64P_GL_CONTEXT_PROFILE_COMPATIBILITY);
+#endif
+
     /* set opengl attributes */
     CoreVideo_GL_SetAttribute(M64P_GL_DOUBLEBUFFER, iDOUBLEBUFFER);
     CoreVideo_GL_SetAttribute(M64P_GL_SWAP_CONTROL, bVerticalSync);
@@ -177,6 +184,13 @@ bool COGLGraphicsContext::ResizeInitialize(uint32 dwWidth, uint32 dwHeight, BOOL
 
     /* hard-coded attribute values */
     const int iDOUBLEBUFFER = 1;
+
+    /* Request GL 2.1 compatibility profile */
+    CoreVideo_GL_SetAttribute(M64P_GL_CONTEXT_MAJOR_VERSION, 2);
+    CoreVideo_GL_SetAttribute(M64P_GL_CONTEXT_MINOR_VERSION, 1);
+#ifndef USE_GLES
+    CoreVideo_GL_SetAttribute(M64P_GL_CONTEXT_PROFILE_MASK, M64P_GL_CONTEXT_PROFILE_COMPATIBILITY);
+#endif
 
     /* set opengl attributes */
     CoreVideo_GL_SetAttribute(M64P_GL_DOUBLEBUFFER, iDOUBLEBUFFER);
