@@ -224,8 +224,12 @@ void dynarec(unsigned int address){
             }
         }
 
-        if (dbg_iter <= 50)
-            fprintf(stderr, "[PPC_DYN] calling dyna_run func=0x%p code=0x%p\n", (void*)func, (void*)code);
+        if (dbg_iter <= 50) {
+            long dist = (long)((uintptr_t)&dyna_mem - (uintptr_t)code);
+            fprintf(stderr, "[PPC_DYN] calling dyna_run func=0x%p code=0x%p dyna_mem=0x%p dist=%ldKB (%srange)\n",
+                    (void*)func, (void*)code, (void*)&dyna_mem, dist/1024,
+                    (dist < 0x2000000LL && dist > -0x2000000LL) ? "IN" : "OUT");
+        }
         interp_addr = address = dyna_run(func, code);
         if (dbg_iter <= 50)
             fprintf(stderr, "[PPC_DYN] dyna_run returned naddr=0x%08X link_branch=0x%p\n",
