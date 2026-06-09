@@ -95,22 +95,44 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
     void* rdram_base = ppc_dynarec_r4300 && ppc_dynarec_r4300->rdram
         ? (void*)ppc_dynarec_r4300->rdram->dram : NULL;
 
+    register long long *r14_val asm("14");
+    register unsigned long *r15_val asm("15");
+    register long long *r16_val asm("16");
+    register double *r17_val asm("17");
+    register uint32_t *r18_val asm("18");
+    register void *r19_val asm("19");
+    register uint32_t *r20_val asm("20");
+    register uint32_t *r21_val asm("21");
+    register PowerPC_func *r22_val asm("22");
+    register unsigned int r23_val asm("23");
+
     __asm__ volatile(
         "stdu   1, -32(1) \n"
         "mfcr   14        \n"
         "stw    14, 8(1)  \n"
-        "mr     14, %4    \n"
-        "mr     15, %5    \n"
-        "mr     16, %6    \n"
-        "mr     17, %7    \n"
-        "mr     18, %8    \n"
-        "mr     19, %9    \n"
-        "mr     20, %10   \n"
-        "mr     21, %11   \n"
-        "mr     22, %12   \n"
+        "mr     14, %0    \n"
+        "mr     15, %1    \n"
+        "mr     16, %2    \n"
+        "mr     17, %3    \n"
+        "mr     18, %4    \n"
+        "mr     19, %5    \n"
+        "mr     20, %6    \n"
+        "mr     21, %7    \n"
+        "mr     22, %8    \n"
         "addi   23, 0, 0  \n"
+        : "=r" (r14_val), "=r" (r15_val), "=r" (r16_val), "=r" (r17_val),
+          "=r" (r18_val), "=r" (r19_val), "=r" (r20_val), "=r" (r21_val),
+          "=r" (r22_val), "=r" (r23_val)
+        : "r" (reg), "r" (reg_cop0),
+          "r" (reg_cop1_simple), "r" (reg_cop1_double),
+          "r" (&FCR31), "r" (rdram_base),
+          "r" (&last_addr), "r" (&next_interupt),
+          "r" (func)
+        : "memory");
+
+    __asm__ volatile(
         "bl     .+4       \n"
-        "mtctr  %13       \n"
+        "mtctr  %4        \n"
         "mflr   4         \n"
         "addi   4, 4, 28  \n"
         "std    4, 20(1)  \n"
@@ -124,12 +146,7 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
         "ld     1, 0(1)   \n"
         : "=r" (naddr), "=r" (link_branch), "=r" (return_addr),
           "=r" (last_func)
-        : "r" (reg), "r" (reg_cop0),
-          "r" (reg_cop1_simple), "r" (reg_cop1_double),
-          "r" (&FCR31), "r" (rdram_base),
-          "r" (&last_addr), "r" (&next_interupt),
-          "r" (func),
-          "r" (code)
+        : "r" (code)
         : "cr0", "cr2",
             "8","9","10","11","12",
             "14","15","16","17","18","19","20","21","22","23",
