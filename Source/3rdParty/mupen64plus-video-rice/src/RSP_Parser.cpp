@@ -1714,8 +1714,15 @@ void RDP_DLParser_Process(void)
     {
         Gfx *pgfx = (Gfx*)&g_pRDRAMu32[(gDlistStack[gDlistStackPointer].pc>>2)];
         gDlistStack[gDlistStackPointer].pc += 8;
-        currentUcodeMap[pgfx->words.w0 >>24](pgfx);
+        uint8 op = pgfx->words.w0 >> 24;
+        if (op == 0xFD)
+            fprintf(stderr, "RICE:   RDP_DPBUF: G_SETTIMG w0=0x%08X w1=0x%08X\n",
+                pgfx->words.w0, pgfx->words.w1);
+        currentUcodeMap[op](pgfx);
     }
+
+    fprintf(stderr, "RICE: RDP_DLParser_Process end gDlistCount=%d\n", status.gDlistCount);
+    fflush(stderr);
 
     CRender::g_pRender->EndRendering();
 }
