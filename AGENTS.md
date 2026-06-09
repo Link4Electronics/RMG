@@ -243,6 +243,117 @@ With optimization ≥ `-O1`, GCC's register allocator reuses r14-r23 (declared d
 
 ---
 
+## GLideN64 endian issues (PPC64 BE)
+
+### RDRAM byte order
+
+mupen64plus-core stores RDRAM in **host byte order**:
+- x86 LE: N64 BE data written to RDRAM is stored as LE words (byte-reversed within each 32-bit word)
+- PPC64 BE: N64 BE data written to RDRAM is stored as BE words (native byte order)
+
+`*(u32*)&RDRAM[addr]` always produces the correct N64 value regardless of host endianness — the LE pointer dereference reverses byte order in the same way the LE storage does, and the BE pointer dereference is a no-op. Both produce the same u32.
+
+However, `*(s16*)&RDRAM[addr]` and byte-level accesses differ:
+- On LE: `*(s16*)&RDRAM[0]` reads bytes [byte0, byte1] as a LE s16. Since the 32-bit word containing the s16 is stored in LE, the two s16 halves of a word are REVERSED (low s16 at even index, high s16 at odd index).
+- On BE: `*(s16*)&RDRAM[0]` reads bytes as a BE s16. The s16 halves are in correct N64 order (high at even index, low at odd index).
+
+### LE-specific XOR patterns in GLideN64
+
+GLideN64 was designed for x86 LE and uses ad-hoc XOR patterns on pointers/indexes to compensate for the LE byte-reversed storage of 16-bit and 8-bit values within 32-bit words. These patterns MUST be compiled out (or made NOP) on PPC64 BE.
+
+| Pattern | Purpose on LE | Problem on BE |
+|---------|---------------|---------------|
+| `((short*)RDRAM)[i ^ 1]` | Swap adjacent s16 halves within a 32-bit word | Reads WRONG s16 (different word half) |
+| `*(s16*)&RDRAM[addr ^ 2]` | Swap bytes of a s16 at misaligned byte address | Reads bytes from wrong offset |
+| `RDRAM[(base + N) ^ 3]` | Reverse byte within 32-bit word for u8 access | Reads byte from wrong position |
+| `((u16*)RDRAM)[i ^ 1]` | Same as short pattern for u16 | Reads wrong u16 |
+| `GRAPHICS_ADDRESS_LOAD` etc. (custom macros) | Byte-swap packed data | Corrupts on BE |
+
+### Affected files (comprehensive)
+
+All patches MUST use `__BIG_ENDIAN__` / `__BYTE_ORDER__` detection (NOT `M64P_BIG_ENDIAN`, which is not passed to GLideN64's build).
+
+| File | Pattern | Data affected |
+|------|---------|---------------|
+| `gSP.cpp:344-351` | `((short*)RDRAM)[(addrShort+4)^1]` | Light position s16 |
+| `gSP.cpp:388-391` | `((short*)RDRAM)[(addrShort+16)^1]` | Light position s16 (CBFD) |
+| `gSP.cpp:410-415` | `((s16*)RDRAM)[(addrShort+0)^1]` / `((u16*)RDRAM)[(addrShort+6)^1]` | Light pos s16, la/qa u16 (Acclaim) |
+| `gSP.cpp:347-349, 416-418` | `RDRAM[(addrByte + N) ^ 3]` | Light ca/la/qa u8 |
+| `gSP.cpp:1088-1095` | `*(s16*)&RDRAM[address ^ 2]` / `*(u8*)&RDRAM[(addr + N) ^ 3]` | DMA vertex s16 xyz + u8 rgba |
+| `gSP.cpp:265-272` | `*(s16*)&RDRAM[address + N]` (no XOR) | Viewport vscale/vtrans — ALREADY CORRECT on BE |
+| `RSP_LoadMatrix.cpp:10-14` | `_N64Matrix *m = (_N64Matrix*)&RDRAM[...]` + `[j ^ 1]` | Matrix s16 int + u16 frac |
+| `GraphicsDrawer.cpp:1242-1244` | `(u16*)(RDRAM + ...)` + `[i ^ 1]` | Depth pixel writes |
+| `GraphicsDrawer.cpp:1323-1325` | `(u16*)(RDRAM + ...)` + `[i ^ 1]` | Palette writes |
+| `ZSortBOSS.cpp:181-188` | `((s16*)RDRAM)[(a+N)^1]` | Viewport/fog s16 |
+| `ZSortBOSS.cpp:691` | `((s16*)RDRAM)[((addr+(i<<4)+(j<<1))>>1)^1]` | Matrix/table s16 |
+| `ZSort.cpp:466-473` | `*(s16*)&RDRAM[(a+N)^1]` / `((s16*)RDRAM)[(a+N)^1]` | Viewport s16 |
+| `F5Indi_Naboo.cpp:490` | `CAST_RDRAM(const u16*, ...)[(shift+N)^1]` | Vertex u16 |
+| `BufferCopy/WriteToRDRAM.h:45-57` | `_dst[numStored ^ _xor]` with `_xor=1` | 16-bit pixel writes |
+
+### Struct casts from RDRAM (no byte-level XOR)
+
+These multi-byte struct fields are read directly from RDRAM via `(T*)&RDRAM[addr]`. On BE the byte order is correct (both host and N64 are BE). On LE the byte order within each multi-byte field is reversed by the pointer dereference, which is the intended behavior.
+
+However, any struct that is read via a cast AND then accessed with XOR patterns internally (e.g. `_N64Matrix`) needs both the struct definition AND the XOR access to be endian-aware.
+
+| Struct | File:Line | Multi-byte fields |
+|--------|-----------|-------------------|
+| `Vertex` (s16 x,y,z; s16 s,t; s8 norm; u8 rgba) | `gSP.cpp:1005` | All s16 |
+| `PDVertex` (s16 x,y,z; s16 s,t; u32 ci) | `gSP.cpp:1073` | s16 + u32 |
+| `SWVertex` (s16 y,x; u16 flag; s16 z) | `gSP.cpp:1292+` | All s16/u16 |
+| `T3DUXVertex` (s16 y,x; u16 flag; s16 z) | `gSP.cpp:1324` | All s16/u16 |
+| `_N64Matrix` (s16 int[4][4]; u16 frac[4][4]) | `RSP_LoadMatrix.cpp:10` | All s16/u16 |
+| `uSprite` (u16 + u32 fields) | `gSP.cpp:2054` | u16/u32 |
+
+### Fixes applied so far
+
+1. **`convert.cpp:102-152`** — `UnswapCopyWrap`: on BE, copy bytes directly (NOP); on LE, keep byte-swap logic. Fixes ucode data string search ("RSP" scan) and texture loading.
+
+2. **`GBI.cpp:398-409`** — CRC computation: on BE, byte-swap each 32-bit ucode word to LE before computing CRC, matching the precomputed LE CRC table.
+
+3. **`Types.h`** — Added endian-aware accessor macros:
+   - `E16_IDX(i)` — for `u16*` index access (LE: `^1`, BE: NOP)
+   - `E16_ADDR(a)` — for byte-offset s16 reads (LE: `^2`, BE: NOP)
+   - `E8_OFF(o)` — for byte offset access (LE: `^3`, BE: NOP)
+   - `E_XOR(x)` — for template/runtime XOR contexts (LE: pass-through, BE: maps to 0)
+   All use `__BIG_ENDIAN__` / `__BYTE_ORDER__` detection.
+
+4. **`gSP.cpp`** — Replaced all 10+ XOR patterns:
+   - Light position/attenuation (`addrShort+4..6 ^1`, `addrByte+3/7/14 ^3`)
+   - CBFD light position (`addrShort+16..19 ^1`, `addrByte+12 ^3`)
+   - Acclaim light data (`addrShort+0..7 ^1`, `addrByte+6..8 ^3`)
+   - DMA vertex xyz/rgba (`address+0/2/4 ^2`, `address+6/7/8/9 ^3`)
+   - CBFD vertex normal (`normalBase+0/1 ^3`)
+   - LookAt vertex alpha (`DMAIO_address+128+index ^3`)
+   - Matrix modify (`pData[i ^1]`)
+
+5. **`gDP.cpp`** — Replaced 5 XOR patterns:
+   - TMEM load 16-bit (`address ^2`)
+   - TMEM load 16-bit with variable t (`(tb+i) ^t`, `(tb+i+1) ^t`)
+   - TMEM load 16-bit fixed (`(tb+i) ^1`)
+   - DMA texture offset (`tex_count ^1`)
+
+6. **`GraphicsDrawer.cpp`** — Replaced 2 XOR patterns:
+   - Depth buffer copy (`(ulx+x) ^1`)
+   - Palette write (`i ^1`)
+
+7. **`RSP_LoadMatrix.cpp`** — Replaced matrix row XOR (`j ^1`)
+
+8. **`BufferCopy/WriteToRDRAM.h`** — Replaced pixel write XORs using `E_XOR(_xor)`
+
+9. **`BufferCopy/ColorBufferToRDRAM.cpp`** — Replaced framebuffer fill XOR (`(x+y*VI.width) ^1`)
+
+### Current status (after GLideN64 endian accessor fixes)
+
+**SM64 boots** (ucode recognized) but **black screen + static audio** status unchanged. All LE-specific XOR byte-swap patterns in critical SM64 rendering paths (gSP, gDP, GraphicsDrawer, RSP_LoadMatrix, BufferCopy) have been wrapped with endian-aware macros. The next compile/test cycle will reveal whether the black screen was caused by these XOR patterns or if additional issues remain.
+
+Remaining files with XOR patterns (not used by SM64, defer for now):
+- `ZSortBOSS.cpp` (Zelda ucode) — ~40 DMEM/RDRAM XOR patterns
+- `ZSort.cpp` (Zelda ucode) — ~30 DMEM/RDRAM XOR patterns
+- `F5Indi_Naboo.cpp` (Perfect Dark ucode) — ~19 DMEM XOR patterns
+
+---
+
 ## Build system
 
 Pass `-DPPC_DYNAREC=ON` to cmake. The `3rdParty/CMakeLists.txt` propagates:
@@ -254,13 +365,13 @@ Pass `-DPPC_DYNAREC=ON` to cmake. The `3rdParty/CMakeLists.txt` propagates:
 
 | Plugin | Build | Runtime | Notes |
 |--------|-------|---------|-------|
-| `mupen64plus-core` | **OK** | **OK** | PPC_DYNAREC enabled via cmake option |
-| `mupen64plus-rsp-hle` | **OK** | **OK** | Endian-aware via `M64P_BIG_ENDIAN` memory macros |
+| `mupen64plus-core` | **OK** | **OK** | Pure/cached interpreter working; ucode crash fixed (RDRAMSize fix); PPC_DYNAREC enabled via cmake option but on hold |
+| `mupen64plus-rsp-hle` | **OK** | **OK** | Endian-aware via `M64P_BIG_ENDIAN` memory macros (XOR-based accessors) |
 | `mupen64plus-rsp-cxd4` | **OK** (scalar) | **OK** | SSE2 path auto-disabled; scalar fallback performs all ops |
-| `mupen64plus-video-GLideN64` | **OK** | **OK** | OpenGL-based; `xxHash` has PPC64 BE detection |
+| `mupen64plus-video-GLideN64` | **OK** | **BROKEN** | Boots SM64 but black screen + static audio. LE-specific XOR byte-swap patterns corrupt vertex/light/matrix/framebuffer data on BE. uc_code CRC + UnswapCopyWrap fixes applied. | |
 | `mupen64plus-video-parallel` | **OK** | **N/A** (no Vulkan on G5) | SSE2 guarded with `#ifdef __SSE2__`, has scalar fallback |
 | `mupen64plus-input-raphnetraw` | **OK** | **OK** | No arch-specific code |
-| `RMG-Audio` | **OK** | **OK** | Endian-aware via `SDL_BYTEORDER` |
+| `RMG-Audio` | **OK** | Tentative** | Endian-aware via `SDL_BYTEORDER`; noise may also stem from mismatched interleave order or corrupted RDRAM buffers |
 | `mupen64plus-rsp-parallel` | **BLOCKED** | **N/A** | Unconditional SSE2 in `rsp_core.cpp` — disabled when `PPC_DYNAREC=ON` |
 
 ### Makefile warning fixes
@@ -268,3 +379,19 @@ Changed `$(warning ...)` to `$(info ...)` with "supported by RMG" for PPC blocks
 - `mupen64plus-core/projects/unix/Makefile` (3 PPC blocks)
 - `mupen64plus-rsp-hle/projects/unix/Makefile` (2 PPC blocks)
 - `mupen64plus-rsp-cxd4/projects/unix/Makefile` (2 PPC blocks)
+
+---
+
+## Current focus
+
+**Primary: Pure interpreter + GLideN64 video plugin** — get SM64 to render correctly on PPC64 BE.
+
+Status: SM64 boots (ucode recognized after CRC/UnswapCopyWrap fixes) but black screen + static audio remains. All LE-specific XOR byte-swap patterns in critical rendering paths (gSP, gDP, GraphicsDrawer, RSP_LoadMatrix, BufferCopy) have been wrapped with endian-aware macros. Next compile/test cycle will reveal if additional issues remain.
+
+**Secondary: PPC64 dynarec** — on hold until interpreter produces correct video/audio output.
+
+Known fixes needed:
+1. ~~Systematic endian-aware accessor macros in GLideN64~~ (DONE — E16_IDX/E16_ADDR/E8_OFF/E_XOR macros deployed across critical SM64 rendering paths)
+2. Verify RMG-Audio endian handling
+3. After GLideN64 renders correctly, verify audio output
+4. Once interpreter is fully functional, return to PPC dynarec testing

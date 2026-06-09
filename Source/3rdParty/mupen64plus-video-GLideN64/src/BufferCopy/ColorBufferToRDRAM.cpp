@@ -278,7 +278,7 @@ void copyWhiteToRDRAM(FrameBuffer * _pBuffer)
 
 		for (u32 y = 0; y < VI.height; ++y) {
 			for (u32 x = 0; x < VI.width; ++x) {
-				ptr_dst[(x + y*VI.width) ^ 1] = 0xFFFF;
+				ptr_dst[E16_IDX(x + y*VI.width)] = 0xFFFF;
 			}
 		}
 	}

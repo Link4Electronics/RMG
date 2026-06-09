@@ -42,7 +42,7 @@ void writeToRdram(TSrc* _src, TDst* _dst,
 		for (u32 x = chunkStart; x < _width; ++x) {
 			c = _src[x];
 			if (tester(c))
-				_dst[numStored ^ _xor] = converter(c, x, y);
+				_dst[numStored ^ E_XOR(_xor)] = converter(c, x, y);
 			++numStored;
 		}
 		++y;
@@ -54,7 +54,7 @@ void writeToRdram(TSrc* _src, TDst* _dst,
 		for (u32 x = 0; x < _width && numStored < _numPixels; ++x) {
 			c = _src[x + y *_width];
 			if (tester(c))
-				_dst[(x + dsty*_width) ^ _xor] = converter(c, x, y);
+				_dst[(x + dsty*_width) ^ E_XOR(_xor)] = converter(c, x, y);
 			++numStored;
 		}
 		++dsty;

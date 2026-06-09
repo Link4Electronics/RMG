@@ -11,5 +11,5 @@ void RSP_LoadMatrix( f32 mtx[4][4], u32 address )
 
     for (u32 i = 0; i < 4; i++)
         for (u32 j = 0; j < 4; j++)
-			mtx[i][j] = GetFloatMatrixElement(n64Mat->integer[i][j ^ 1], n64Mat->fraction[i][j ^ 1]);
+			mtx[i][j] = GetFloatMatrixElement(n64Mat->integer[i][E16_IDX(j)], n64Mat->fraction[i][E16_IDX(j)]);
 }

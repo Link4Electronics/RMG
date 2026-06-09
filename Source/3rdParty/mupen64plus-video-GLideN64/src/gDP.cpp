@@ -196,7 +196,7 @@ void gDPSetTextureImage(u32 format, u32 size, u32 width, u32 address)
 	if (gSP.DMAOffsets.tex_offset != 0) {
 		if (format == G_IM_FMT_RGBA) {
 			u16 * t = reinterpret_cast<u16*>(RDRAM + gSP.DMAOffsets.tex_offset);
-			gSP.DMAOffsets.tex_shift = t[gSP.DMAOffsets.tex_count ^ 1];
+			gSP.DMAOffsets.tex_shift = t[E16_IDX(gSP.DMAOffsets.tex_count)];
 			gDP.textureImage.address += gSP.DMAOffsets.tex_shift;
 		} else {
 			gSP.DMAOffsets.tex_offset = 0;
@@ -620,11 +620,11 @@ void gDPLoadBlock32(u32 uls,u32 lrs, u32 dxt)
 			t = ((j >> 11) & 1) ? 3 : 1;
 			if (t != oldt)
 				i += line;
-			ptr = ((tb + i) ^ t) & 0x3ff;
+			ptr = ((tb + i) ^ E_XOR(t)) & 0x3ff;
 			c = src[addr + i];
 			tmem16[ptr] = c >> 16;
 			tmem16[ptr | 0x400] = c & 0xffff;
-			ptr = ((tb + i + 1) ^ t) & 0x3ff;
+			ptr = ((tb + i + 1) ^ E_XOR(t)) & 0x3ff;
 			c = src[addr + i + 1];
 			tmem16[ptr] = c >> 16;
 			tmem16[ptr | 0x400] = c & 0xffff;
@@ -633,7 +633,7 @@ void gDPLoadBlock32(u32 uls,u32 lrs, u32 dxt)
 	} else {
 		u32 c, ptr;
 		for (u32 i = 0; i < width; i++) {
-			ptr = ((tb + i) ^ 1) & 0x3ff;
+			ptr = E16_IDX(tb + i) & 0x3ff;
 			c = src[addr + i];
 			tmem16[ptr] = c >> 16;
 			tmem16[ptr | 0x400] = c & 0xffff;
@@ -750,7 +750,7 @@ void gDPLoadTLUT( u32 tile, u32 uls, u32 ult, u32 lrs, u32 lrt )
 	int i = 0;
 	while (i < count) {
 		for (u16 j = 0; (j < 16) && (i < count); ++j, ++i) {
-			dest[(destIdx | 0x0400) & 0x07FF] = swapword(*reinterpret_cast<u16*>(RDRAM + (address ^ 2)));
+			dest[(destIdx | 0x0400) & 0x07FF] = swapword(*reinterpret_cast<u16*>(RDRAM + E16_ADDR(address)));
 			address += 2;
 			destIdx += 4;
 		}

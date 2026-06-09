@@ -1241,7 +1241,7 @@ bool texturedRectDepthBufferCopy(const GraphicsDrawer::TexturedRectParams & _par
 		u16 * pSrc = reinterpret_cast<u16*>(TMEM) + _params.s/32;
 		u16 *pDst = reinterpret_cast<u16*>(RDRAM + gDP.colorImage.address);
 		for (u32 x = 0; x < width; ++x)
-			pDst[(ulx + x) ^ 1] = swapword(pSrc[x]);
+			pDst[E16_IDX(ulx + x)] = swapword(pSrc[x]);
 
 		return true;
 	}
@@ -1322,7 +1322,7 @@ bool texturedRectPaletteMod(const GraphicsDrawer::TexturedRectParams & _params)
 	u16 * src = reinterpret_cast<u16*>(&TMEM[256]);
 	u16 * dst = reinterpret_cast<u16*>(RDRAM + gDP.colorImage.address);
 	for (u32 i = 0; i < 16; ++i)
-		dst[i ^ 1] = (src[i << 2] & 0x100) ? prim16 : env16;
+		dst[E16_IDX(i)] = (src[i << 2] & 0x100) ? prim16 : env16;
 	return true;
 }
 
