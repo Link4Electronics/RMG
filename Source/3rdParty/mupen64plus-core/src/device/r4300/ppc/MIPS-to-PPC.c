@@ -40,7 +40,9 @@ static void emit_64bit_call(uintptr_t target) {
     uint64_t t = (uint64_t)target;
     EMIT_LIS(12, (t >> 48) & 0xFFFF);
     EMIT_ORI(12, 12, (t >> 32) & 0xFFFF);
-    GEN_RLDICR(tmp, 12, 12, 32, 31, 0); set_next_dst(tmp);
+    GEN_RLDICR(tmp, 12, 12, 32, 31, 0);
+    fprintf(stderr, "[RLDICR] tmp=0x%08X (target=0x%lX)\n", tmp, t);
+    set_next_dst(tmp);
     EMIT_ORIS(12, 12, (t >> 16) & 0xFFFF);
     EMIT_ORI(12, 12, t & 0xFFFF);
     EMIT_MTCTR(12);
