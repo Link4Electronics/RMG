@@ -7,7 +7,8 @@
 - **OS:** Power Linux kernel 7.0.11
 - **Page size:** 64 KB
 - **Sub-arch:** Power Mac G4/G5 (AltiVec)
-- **Dev machine:** x86_64 (cross-compilation)
+- **Dev machine:** x86_64 (has the repo cloned to make the changes)
+- **Workflow:** edit files on dev machine → user compiles on G5 → user reports issues back
 
 ## Project overview
 
@@ -154,6 +155,8 @@ PPC64 has 8-byte `long` and `unsigned long`. The recompiled PPC code uses 32-bit
 | **`bl` ±32 MB range exceeded**: mmap'd code buffer can be 575+ MB from library text segment; all 14 CALL jumps silently overflow 24-bit LI field and jump to garbage | Replaced all `EMIT_B(add_jump(..., 1, 1), 0, 1)` with `emit_64bit_call()` — loads full 64-bit address into r12, `mtctr` + `bctrl` for unlimited range | `MIPS-to-PPC.c` | `emit_64bit_call()` at line ~37, 14 call sites across file |
 | **FAILSAFE_REC_NO_VM not set**: fast memory path (`genCallDynaMemVM` lines 1947-2073) emits direct PPC loads/stores at N64 KSEG1 addresses `(addr & 0x1FFFFFFF) \| 0x40000000` — unmapped on Linux | Set `failsafeRec \|= FAILSAFE_REC_NO_VM` in `ppc_dynarec_init()` to force slow path via `dyna_mem()` C function | `ppc_dynarec.c` | 488 |
 | **Register allocator uses r2/r13 on PPC64 ELFv2**: r2=TOC pointer, r13=thread pointer/small data area. If allocator maps a MIPS GPR to r2/r13, all C function calls from recompiled code have corrupted TOC/DSA. | Set `availableRegsDefault[2]=0` and `availableRegsDefault[13]=0` in `Register-Cache.c` to reserve them. Only r24-r31 are now available for MIPS GPR mapping. | `Register-Cache.c` | 13-17 |
+| **`bl 4` trampoline wrong on Linux GAS**: Xenon assembler interprets `bl 4` as `bl .+4` (skip 1 instruction), but Linux GAS interprets it as `bl` to absolute address 4 — huge negative offset, skips `mtctr`, so `bctrl` hits uninitialized CTR (32-bit truncated address → crash at `0x00000000CC076770`). | Changed `bl 4` to `bl .+4` (standard GAS idiom). Also merged two separate asm blocks into one to prevent compiler from corrupting DYNAREG (r14-r23) between blocks. | `ppc_dynarec.c` | 97-136 |
+| **D-cache/I-cache coherency**: `dcbf` is a hint instruction (can be ignored); `ICInvalidateRange` had no `sync` before `isync`. | Changed `dcbf` → `dcbst` (guaranteed store-back to memory); added `sync` before `isync` in `ICInvalidateRange`. | `Recomp-Cache.c` | 13-29 |
 
 The `emit_64bit_call()` helper uses r12 (consistent with PPC64 ELFv2 ABI for function entry point):
 ```c

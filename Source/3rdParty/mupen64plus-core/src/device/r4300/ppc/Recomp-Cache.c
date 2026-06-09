@@ -15,7 +15,7 @@ void DCFlushRange(void* startaddr, unsigned int len)
     unsigned long start = (unsigned long)startaddr & ~31UL;
     unsigned long end = (unsigned long)startaddr + len;
     for (; start < end; start += 32)
-        __asm__ __volatile__("dcbf 0,%0" :: "r"(start) : "memory");
+        __asm__ __volatile__("dcbst 0,%0" :: "r"(start) : "memory");
     __asm__ __volatile__("sync" ::: "memory");
 }
 
@@ -25,6 +25,7 @@ void ICInvalidateRange(void* startaddr, unsigned int len)
     unsigned long end = (unsigned long)startaddr + len;
     for (; start < end; start += 32)
         __asm__ __volatile__("icbi 0,%0" :: "r"(start) : "memory");
+    __asm__ __volatile__("sync" ::: "memory");
     __asm__ __volatile__("isync" ::: "memory");
 }
 
