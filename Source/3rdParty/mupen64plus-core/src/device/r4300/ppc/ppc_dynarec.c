@@ -140,8 +140,14 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
     return naddr;
 }
 
+static int dbg_iter = 0;
 void dynarec(unsigned int address){
+    fprintf(stderr, "[PPC_DYN] dynarec() entered with address=0x%08X\n", address);
     while(1){
+        if (++dbg_iter <= 50 || (dbg_iter & 0xFFF) == 0)
+            fprintf(stderr, "[PPC_DYN] iter=%d address=0x%08X interp_addr=0x%08X\n",
+                    dbg_iter, address, interp_addr);
+
         int stop_flag = 0;
         if (ppc_dynarec_r4300) {
             stop_flag = *r4300_stop(ppc_dynarec_r4300);
@@ -152,6 +158,8 @@ void dynarec(unsigned int address){
         unsigned long paddr = get_physical_addr(address);
 
         if(paddr == 0xFFFFFFFF){
+            if (dbg_iter <= 50)
+                fprintf(stderr, "[PPC_DYN] TLB refill for 0x%08X\n", address);
             TLB_refill_exception(ppc_dynarec_r4300, address, 2);
             link_branch = NULL;
             address = interp_addr;
@@ -164,6 +172,9 @@ void dynarec(unsigned int address){
             dst_block->end_address   = (address & ~0xFFF) + 0x1000;
             init_block(dst_block);
             blocks[address>>12] = dst_block;
+            if (dbg_iter <= 50)
+                fprintf(stderr, "[PPC_DYN] new block 0x%08X-0x%08X\n",
+                        dst_block->start_address, dst_block->end_address);
         } else if(invalid_code[address>>12]){
             invalidate_block(dst_block);
         }
@@ -177,7 +188,19 @@ void dynarec(unsigned int address){
                 invalidate_func(saddr);
                 dst_block->flags[(address-dst_block->start_address)>>2] |= BLOCK_FLAG_SPLIT;
             }
+            if (dbg_iter <= 50)
+                fprintf(stderr, "[PPC_DYN] recompiling at 0x%08X\n", saddr);
             func = recompile_block(dst_block, saddr);
+            if (dbg_iter <= 50)
+                fprintf(stderr, "[PPC_DYN] recompiled %slen=%u start=0x%08X end=0x%08X\n",
+                        func ? "" : "NULL func ",
+                        func ? func->code_length : 0,
+                        func ? func->start_address : 0,
+                        func ? func->end_address : 0);
+            if (!func) {
+                fprintf(stderr, "[PPC_DYN] FATAL: recompile_block returned NULL at 0x%08X\n", saddr);
+                break;
+            }
         } else {
 #ifdef USE_RECOMP_CACHE
             RecompCache_Update(func);
@@ -201,11 +224,18 @@ void dynarec(unsigned int address){
             }
         }
 
+        if (dbg_iter <= 50)
+            fprintf(stderr, "[PPC_DYN] calling dyna_run func=0x%p code=0x%p\n", (void*)func, (void*)code);
         interp_addr = address = dyna_run(func, code);
+        if (dbg_iter <= 50)
+            fprintf(stderr, "[PPC_DYN] dyna_run returned naddr=0x%08X link_branch=0x%p\n",
+                    interp_addr, (void*)link_branch);
 
         if(!noCheckInterrupt){
             last_addr = interp_addr;
             if(next_interupt <= Count){
+                if (dbg_iter <= 50)
+                    fprintf(stderr, "[PPC_DYN] gen_interupt next_int=%u Count=%u\n", next_interupt, Count);
                 gen_interupt();
                 address = interp_addr;
             }
@@ -213,6 +243,7 @@ void dynarec(unsigned int address){
         noCheckInterrupt = 0;
     }
     interp_addr = address;
+    fprintf(stderr, "[PPC_DYN] dynarec() exiting, final address=0x%08X\n", address);
 }
 
 unsigned int decodeNInterpret(MIPS_instr mips, unsigned int pc,

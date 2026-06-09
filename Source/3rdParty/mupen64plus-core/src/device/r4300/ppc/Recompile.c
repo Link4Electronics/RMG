@@ -189,6 +189,17 @@ PowerPC_func* recompile_block(PowerPC_block* ppc_block, unsigned int addr)
     func->links_out = NULL;
     func->lru = 0;
 
+    /* Debug: dump first 16 MIPS words at the source address */
+    if (ppc_dynarec_r4300 && ppc_dynarec_r4300->rdram) {
+        MIPS_instr* dbg_src = (MIPS_instr*)(ppc_dynarec_r4300->rdram->dram + ((addr & 0x1FFFFFFF) >> 2));
+        fprintf(stderr, "[RECOMP] reading MIPS code from rdram+0x%08X (vaddr 0x%08X), first words:",
+                (addr & 0x1FFFFFFF), addr);
+        int di;
+        for (di = 0; di < 16 && di < 64; di++)
+            fprintf(stderr, " %08X", dbg_src[di]);
+        fprintf(stderr, "\n");
+    }
+
     int need_pad = pass0(ppc_block, func);
 
     invalidate_func(func->end_address - 4);
