@@ -604,6 +604,22 @@ typedef unsigned int PowerPC_instr;
 #define GEN_SLWI(ppc,rd,ra,sh) \
     GEN_RLWINM(ppc,rd,ra,(sh),0,31-(sh))
 
+/* PPC64: rotate left doubleword immediate then clear right */
+#define GEN_RLDICR(ppc,ra,rs,sh,me,rc) \
+    { ppc = NEW_PPC_INSTR(); \
+      ppc |= (30 << 26); \
+      ppc |= ((rs) & 0x1F) << 21; \
+      ppc |= ((ra) & 0x1F) << 16; \
+      ppc |= ((sh) & 0x1F) << 11; \
+      ppc |= ((me) & 0x1F) << 6; \
+      ppc |= (1 << 5); \
+      ppc |= (((sh) >> 5) & 1) << 4; \
+      ppc |= (((me) >> 5) & 1) << 3; \
+      ppc |= ((rc) & 1); }
+
+#define GEN_SLD(ppc,ra,rs,sh) \
+    GEN_RLDICR(ppc,ra,rs,sh,0,0)
+
 #define GEN_SRAWI(ppc,rd,ra,sh) \
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \

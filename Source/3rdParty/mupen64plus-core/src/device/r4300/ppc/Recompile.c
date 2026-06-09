@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
 #include "device/r4300/r4300_core.h"
 #include "device/r4300/cp0.h"
 #include "device/rdram/rdram.h"
@@ -157,8 +158,14 @@ static void pass2(PowerPC_block* ppc_block, PowerPC_func* func)
 
 static void genJumpPad(void)
 {
-    EMIT_LIS(3, ((uintptr_t)(&noCheckInterrupt)) >> 16);
-    EMIT_ORI(3, 3, ((uintptr_t)(&noCheckInterrupt)) & 0xFFFF);
+    /* Load full 64-bit address of noCheckInterrupt on PPC64 */
+    uint64_t nci_addr = (uint64_t)(&noCheckInterrupt);
+    PowerPC_instr tmp;
+    EMIT_LIS(3, (nci_addr >> 48) & 0xFFFF);
+    EMIT_ORI(3, 3, (nci_addr >> 32) & 0xFFFF);
+    GEN_RLDICR(tmp, 3, 3, 32, 31, 0); set_next_dst(tmp);
+    EMIT_ORIS(3, 3, (nci_addr >> 16) & 0xFFFF);
+    EMIT_ORI(3, 3, nci_addr & 0xFFFF);
     EMIT_LI(0, 1);
     EMIT_STW(0, 0, 3);
     EMIT_LIS(3, (get_src_pc() + 4) >> 16);

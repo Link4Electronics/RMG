@@ -95,7 +95,7 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
         ? (void*)ppc_dynarec_r4300->rdram->dram : NULL;
 
     __asm__ volatile(
-        "stwu   1, -32(1) \n"
+        "stdu   1, -32(1) \n"
         "mfcr   14        \n"
         "stw    14, 8(1)  \n"
         "mr     14, %0    \n"
@@ -120,13 +120,13 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
         "mtctr  %4        \n"
         "mflr   4         \n"
         "addi   4, 4, 20  \n"
-        "stw    4, 20(1)  \n"
+        "std    4, 20(1)  \n"
         "bctrl            \n"
         "mr     %0, 3     \n"
-        "lwz    %2, 20(1) \n"
+        "ld     %2, 20(1) \n"
         "mflr   %1        \n"
         "mr     %3, 22    \n"
-        "lwz    1, 0(1)   \n"
+        "ld     1, 0(1)   \n"
         : "=r" (naddr), "=r" (link_branch), "=r" (return_addr),
           "=r" (last_func)
         : "r" (code)

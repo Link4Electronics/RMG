@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <assert.h>
+#include <stdint.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -227,8 +228,13 @@ void RecompCache_Link(PowerPC_func* src_func, PowerPC_instr* src_instr,
     dst_func->links_in = fln;
     insert_func(&src_func->links_out, dst_func);
 
-    GEN_LIS(*(src_instr-10), DYNAREG_FUNC, ((unsigned long)dst_func >> 16) & 0xFFFF);
-    GEN_ORI(*(src_instr-9), DYNAREG_FUNC, DYNAREG_FUNC, (unsigned long)dst_func & 0xFFFF);
+    /* Load dst_func address (64-bit on PPC64) into DYNAREG_FUNC */
+    uint64_t df_addr = (uint64_t)dst_func;
+    GEN_LIS(*(src_instr-10), DYNAREG_FUNC, (df_addr >> 48) & 0xFFFF);
+    GEN_ORI(*(src_instr-9), DYNAREG_FUNC, DYNAREG_FUNC, (df_addr >> 32) & 0xFFFF);
+    GEN_RLDICR(*(src_instr-8), DYNAREG_FUNC, DYNAREG_FUNC, 32, 31, 0);
+    GEN_ORIS(*(src_instr-7), DYNAREG_FUNC, DYNAREG_FUNC, (df_addr >> 16) & 0xFFFF);
+    GEN_ORI(*(src_instr-6), DYNAREG_FUNC, DYNAREG_FUNC, df_addr & 0xFFFF);
     GEN_B(*src_instr, (PowerPC_instr*)dst_instr-src_instr, 0, 0);
     DCFlushRange(src_instr-10, 11*sizeof(PowerPC_instr));
     ICInvalidateRange(src_instr-10, 11*sizeof(PowerPC_instr));
