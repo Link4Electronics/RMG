@@ -1239,7 +1239,7 @@ void DLParser_SetScissor(Gfx *gfx)
 
 void DLParser_FillRect(Gfx *gfx)
 {
-    fprintf(stderr, "RICE: DLParser_FillRect w0=0x%08X w1=0x%08X\n", gfx->words.w0, gfx->words.w1); fflush(stderr);
+    //fprintf(stderr, "RICE: DLParser_FillRect w0=0x%08X w1=0x%08X\n", gfx->words.w0, gfx->words.w1); fflush(stderr);
     DP_Timing(DLParser_FillRect);   // fix me
     status.primitiveType = PRIM_FILLRECT;
 

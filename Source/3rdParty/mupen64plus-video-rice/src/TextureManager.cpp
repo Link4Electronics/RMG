@@ -18,6 +18,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include <cmath>
+#include <cstdio>
 #include <exception>
 
 #include "CombinerDefs.h"
@@ -545,6 +546,9 @@ bool lastEntryModified = false;
 
 TxtrCacheEntry * CTextureManager::GetTexture(TxtrInfo * pgti, bool fromTMEM, bool doCRCCheck, bool AutoExtendTexture)
 {
+    fprintf(stderr, "RICE: GetTexture fmt=%d sz=%d addr=0x%08X w=%d h=%d pal=0x%08X\n",
+        pgti->Format, pgti->Size, pgti->dwAddr, pgti->dwWidth, pgti->dwHeight, pgti->dwPalAddr);
+    fflush(stderr);
     TxtrCacheEntry *pEntry;
 
     if( g_curRomInfo.bDisableTextureCRC )
@@ -813,6 +817,7 @@ extern ConvertFunction  gConvertFunctions_16_FullTMEM[ 8 ][ 4 ];
 extern ConvertFunction  gConvertTlutFunctions_16[ 8 ][ 4 ];
 void CTextureManager::ConvertTexture(TxtrCacheEntry * pEntry, bool fromTMEM)
 {
+    fprintf(stderr, "RICE: ConvertTexture fmt=%d sz=%d\n", pEntry->ti.Format, pEntry->ti.Size); fflush(stderr);
     static uint32 dwCount = 0;
 
     // We first figure out which convert function to use in the various

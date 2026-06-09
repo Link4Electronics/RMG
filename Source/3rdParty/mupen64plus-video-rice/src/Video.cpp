@@ -169,9 +169,12 @@ static void ResizeStep2(void)
 
 static void UpdateScreenStep2 (void)
 {
-    fprintf(stderr, "RICE: UpdateScreenStep2 gDlistCount=%d VIorigin=0x%08X\n",
-        status.gDlistCount, *g_GraphicsInfo.VI_ORIGIN_REG); fflush(stderr);
+    //fprintf(stderr, "RICE: UpdateScreenStep2 gDlistCount=%d VIorigin=0x%08X\n",
+    //    status.gDlistCount, *g_GraphicsInfo.VI_ORIGIN_REG); fflush(stderr);
     status.bVIOriginIsUpdated = false;
+
+    fprintf(stderr, "RICE: screenUpdate=%d bScreenIsDrawn=%d gDlistCount=%d\n",
+        currentRomOptions.screenUpdateSetting, status.bScreenIsDrawn, status.gDlistCount); fflush(stderr);
 
     if( status.ToToggleFullScreen && status.gDlistCount > 0 )
     {
@@ -780,7 +783,7 @@ EXPORT int CALL RomOpen(void)
 //---------------------------------------------------------------------------------------
 EXPORT void CALL UpdateScreen(void)
 {
-    fprintf(stderr, "RICE: UpdateScreen called\n"); fflush(stderr);
+    //fprintf(stderr, "RICE: UpdateScreen called\n"); fflush(stderr);
     if(options.bShowFPS)
     {
         static unsigned int lastTick=0;
