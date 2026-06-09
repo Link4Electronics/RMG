@@ -1271,7 +1271,7 @@ inline void ReplaceAlphaWithFogFactor(int i)
 #if !defined(NO_ASM)
 void ProcessVertexDataSSE(uint32 dwAddr, uint32 dwV0, uint32 dwNum)
 {
-    fprintf(stderr, "RICE: ProcessVertexDataSSE addr=0x%08X v0=%d num=%d\n", dwAddr, dwV0, dwNum); fflush(stderr);
+    //fprintf(stderr, "RICE: ProcessVertexDataSSE addr=0x%08X v0=%d num=%d\n", dwAddr, dwV0, dwNum); fflush(stderr);
     UpdateCombinedMatrix();
 
     // This function is called upon SPvertex
@@ -1376,7 +1376,7 @@ void ProcessVertexDataSSE(uint32 dwAddr, uint32 dwV0, uint32 dwNum)
 
 void ProcessVertexDataNoSSE(uint32 dwAddr, uint32 dwV0, uint32 dwNum)
 {
-    fprintf(stderr, "RICE: ProcessVertexDataNoSSE addr=0x%08X v0=%d num=%d\n", dwAddr, dwV0, dwNum); fflush(stderr);
+    //fprintf(stderr, "RICE: ProcessVertexDataNoSSE addr=0x%08X v0=%d num=%d\n", dwAddr, dwV0, dwNum); fflush(stderr);
 
     UpdateCombinedMatrix();
 

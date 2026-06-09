@@ -227,9 +227,9 @@ void RSP_GBI2_MoveWord(Gfx *gfx)
 
 void RSP_GBI2_Tri1(Gfx *gfx)
 {
-    fprintf(stderr, "RICE: GBI2_Tri1 v0=%d v1=%d v2=%d\n",
-        gfx->gbi2tri1.v0/gRSP.vertexMult, gfx->gbi2tri1.v1/gRSP.vertexMult, gfx->gbi2tri1.v2/gRSP.vertexMult);
-    fflush(stderr);
+    //fprintf(stderr, "RICE: GBI2_Tri1 v0=%d v1=%d v2=%d\n",
+    //    gfx->gbi2tri1.v0/gRSP.vertexMult, gfx->gbi2tri1.v1/gRSP.vertexMult, gfx->gbi2tri1.v2/gRSP.vertexMult);
+    //fflush(stderr);
     if( gfx->words.w0 == 0x05000017 && gfx->gbi2tri1.flag == 0x80 )
     {
         // The ObjLoadTxtr / Tlut cmd for Evangelion.v64
@@ -292,11 +292,11 @@ void RSP_GBI2_Tri1(Gfx *gfx)
 
 void RSP_GBI2_Tri2(Gfx *gfx)
 {
-    fprintf(stderr, "RICE: GBI2_Tri2 v0=%d v1=%d v2=%d v3=%d v4=%d\n",
-        gfx->gbi2tri2.v0/gRSP.vertexMult, gfx->gbi2tri2.v1/gRSP.vertexMult,
-        gfx->gbi2tri2.v2/gRSP.vertexMult, gfx->gbi2tri2.v3/gRSP.vertexMult,
-        gfx->gbi2tri2.v4/gRSP.vertexMult);
-    fflush(stderr);
+    //fprintf(stderr, "RICE: GBI2_Tri2 v0=%d v1=%d v2=%d v3=%d v4=%d\n",
+    //    gfx->gbi2tri2.v0/gRSP.vertexMult, gfx->gbi2tri2.v1/gRSP.vertexMult,
+    //    gfx->gbi2tri2.v2/gRSP.vertexMult, gfx->gbi2tri2.v3/gRSP.vertexMult,
+    //    gfx->gbi2tri2.v4/gRSP.vertexMult);
+    //fflush(stderr);
     if( gfx->words.w0 == 0x0600002f && gfx->gbi2tri2.flag == 0x80 )
     {
         // The ObjTxSprite cmd for Evangelion.v64
