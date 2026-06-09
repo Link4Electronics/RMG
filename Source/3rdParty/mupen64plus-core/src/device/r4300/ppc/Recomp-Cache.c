@@ -184,7 +184,7 @@ void RecompCache_Alloc(unsigned int size, unsigned int address, PowerPC_func* fu
     size_t aligned_size = ((size + pagesize - 1) / pagesize) * pagesize;
     void* code = mmap(NULL, aligned_size, PROT_READ | PROT_WRITE | PROT_EXEC,
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    fprintf(stderr, "[RECOMP] mmap code=%p size=%zu pagesize=%ld aligned=%zu prot=0x%x addr=0x%08X\n",
+    fprintf(stderr, "[RECOMP] mmap code=%p size=%u pagesize=%ld aligned=%zu prot=0x%x addr=0x%08X\n",
             code, size, pagesize, aligned_size,
             PROT_READ|PROT_WRITE|PROT_EXEC,
             (unsigned int)(unsigned long)func->code);
