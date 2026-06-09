@@ -468,6 +468,8 @@ void CRender::DrawSpriteR(uObjTxSprite &sprite, bool initCombiner, uint32 tile, 
 
 void CRender::DrawFrameBuffer(bool useVIreg, uint32 left, uint32 top, uint32 width, uint32 height)
 {
+    fprintf(stderr, "RICE: DrawFrameBuffer useVIreg=%d left=%d top=%d w=%d h=%d\n", useVIreg, left, top, width, height); fflush(stderr);
+
     BeginRendering();
 
     LoadFrameBuffer(useVIreg, left, top, width, height);

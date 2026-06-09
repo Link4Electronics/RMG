@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "ConvertImage.h"
 #include "Debugger.h"
 #include "GraphicsContext.h"
+#include <cstdio>
 #include "RSP_Parser.h"
 #include "RSP_S2DEX.h"
 #include "Render.h"
@@ -1237,7 +1238,8 @@ void DLParser_SetScissor(Gfx *gfx)
 
 
 void DLParser_FillRect(Gfx *gfx)
-{ 
+{
+    fprintf(stderr, "RICE: DLParser_FillRect w0=0x%08X w1=0x%08X\n", gfx->words.w0, gfx->words.w1); fflush(stderr);
     DP_Timing(DLParser_FillRect);   // fix me
     status.primitiveType = PRIM_FILLRECT;
 

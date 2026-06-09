@@ -1116,6 +1116,7 @@ extern bool bHalfTxtScale;
 
 bool CRender::DrawTriangles()
 {
+    fprintf(stderr, "RICE: DrawTriangles numVerts=%d\n", gRSP.numVertices); fflush(stderr);
     if( !status.bCIBufferIsRendered ) g_pFrameBufferManager->ActiveTextureBuffer();
 
     DEBUGGER_ONLY_IF( (!debuggerEnableZBuffer), {ZBufferEnable( FALSE );} );

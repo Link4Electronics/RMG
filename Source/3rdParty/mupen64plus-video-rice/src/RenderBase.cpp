@@ -29,6 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "DeviceBuilder.h"
 #include "RSP_Parser.h"
 #include "Render.h"
+#include <cstdio>
 #include "RenderBase.h"
 #include "Timing.h"
 #include "VectorMath.h"
@@ -1270,6 +1271,7 @@ inline void ReplaceAlphaWithFogFactor(int i)
 #if !defined(NO_ASM)
 void ProcessVertexDataSSE(uint32 dwAddr, uint32 dwV0, uint32 dwNum)
 {
+    fprintf(stderr, "RICE: ProcessVertexDataSSE addr=0x%08X v0=%d num=%d\n", dwAddr, dwV0, dwNum); fflush(stderr);
     UpdateCombinedMatrix();
 
     // This function is called upon SPvertex
@@ -1374,6 +1376,7 @@ void ProcessVertexDataSSE(uint32 dwAddr, uint32 dwV0, uint32 dwNum)
 
 void ProcessVertexDataNoSSE(uint32 dwAddr, uint32 dwV0, uint32 dwNum)
 {
+    fprintf(stderr, "RICE: ProcessVertexDataNoSSE addr=0x%08X v0=%d num=%d\n", dwAddr, dwV0, dwNum); fflush(stderr);
 
     UpdateCombinedMatrix();
 
