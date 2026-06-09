@@ -184,7 +184,7 @@ void cp0_update_count(struct r4300_core* r4300)
 static void exception_epilog(struct r4300_core* r4300)
 {
 #ifndef NO_ASM
-#ifndef NEW_DYNAREC
+#if !defined(NEW_DYNAREC) && !defined(PPC_DYNAREC)
     if (r4300->emumode == EMUMODE_DYNAREC)
     {
         dyna_jump();
@@ -193,7 +193,7 @@ static void exception_epilog(struct r4300_core* r4300)
 #endif
 #endif
 
-#ifndef NEW_DYNAREC
+#if !defined(NEW_DYNAREC) && !defined(PPC_DYNAREC)
     if (r4300->emumode != EMUMODE_DYNAREC || r4300->recomp.dyna_interp)
     {
         r4300->recomp.dyna_interp = 0;

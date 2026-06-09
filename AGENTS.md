@@ -88,3 +88,84 @@ Since the existing mupen64-360 dynarec doesn't use any vector instructions, addi
 3. **Vectorized COP1 (FPU)** operations using AltiVec
 
 The existing `EMIT_LVX`/`EMIT_STVX`/`EMIT_VOR` macros in `Recompile.h` are standard AltiVec and work on both G4/G5 and Xenon without modification.
+
+## PPC dynarec integration status
+
+All 11 PPC dynarec source files created in `device/r4300/ppc/` (from mupen64-360, adapted for RMG):
+
+| File | Lines | Role |
+|------|-------|------|
+| `MIPS-to-PPC.c` | 2098 | MIPS→PPC instruction translator |
+| `PowerPC.h` | 1156 | PPC instruction encoding macros |
+| `ppc_dynarec.c` | 517 | Main entry: `dynarec()` loop, `decodeNInterpret()`, `dyna_mem()`, trampoline |
+| `Recompile.h` | 318 | EMIT_* macros, block compilation interface |
+| `MIPS.h` | 279 | MIPS opcode decoding helpers |
+| `Recomp-Cache.c` | 256 | Recompiled code cache with LRU |
+| `Recompile.c` | 200 | Block compilation, jump fixup |
+| `Register-Cache.c` | 345 | GPR/FPR register allocator |
+| `FuncTree.c` | 61 | BST for recompiled block lookup |
+| `ppc_dynarec_compat.h` | 69 | Shim: extern globals, inline wrappers |
+| `ppc_dynarec.h` | 15 | Public API declarations |
+| `Register-Cache.h` | 30 | Register cache API |
+| `Recomp-Cache.h` | 28 | Recomp cache API |
+| `Wrappers.h` | 70 | DYNAREG bindings, function declarations, COP0 reg macros |
+| `MIPS-to-PPC.h` | 29 | Translator API, `convert()` |
+
+### Integration into r4300_core
+
+- `r4300_core.c`: PPC_DYNAREC dispatch in `run_r4300()`, `invalidate_r4300_cached_code()`, `generic_jump_to()`
+- `r4300_core.h`: Guards `struct recomp` with `#if !defined(NEW_DYNAREC) && !defined(PPC_DYNAREC)`; includes `ppc/ppc_dynarec.h`
+- `cp0.c`: Guarded `dyna_jump()`/`recomp.dyna_interp` references with `#if !defined(NEW_DYNAREC) && !defined(PPC_DYNAREC)`
+
+### Key adaptations from mupen64-360
+
+| Feature | Original (mupen64-360) | RMG (PPC_DYNAREC) |
+|---------|----------------------|-------------------|
+| RDRAM base | `rdram->base` (global) | `r4300->rdram->dram` (per-instance) |
+| Memory access | `read_word_in_memory()` macros | RMG's `mem_get_handler()`/`mem_read32()`/`mem_write32()` |
+| Globals | Direct `reg[]`, `reg_cop0[]` arrays | Synced via `sync_r4300_state()`/`sync_back_state()` |
+| Interpreter calls | `interp_ops[64]` table | Switch-based `decodeNInterpret()` |
+| Heap | `__lwp_heap_*` (libogc) | `malloc()`/`free()` |
+| Cache mgmt | Xenon `memdcbf`/`memicbi` | inline `dcbf`/`icbi` asm |
+| FPU control | `mfspefscr`/`mtspefscr` (SPE) | Standard `mtfsf`/`mffs` (scalar) |
+| Interrupt check | `check_interupt()` inline asm | C function calling `gen_interrupt()` |
+| TLB | `tlb_map()` with bare args | `tlb_map(&r4300->cp0.tlb, entry)` |
+
+### Critical PPC64 type width fixes
+
+PPC64 has 8-byte `long` and `unsigned long`. The recompiled PPC code uses 32-bit `lwz`/`stw` to access these globals, requiring exact 4-byte alignment:
+
+| Global | Original type | Fixed type | Reason |
+|--------|-------------|------------|--------|
+| `reg_cop0[32]` | `unsigned long` | `uint32_t` | Accessed via `lwz` at offset `rd*4` |
+| `FCR0`, `FCR31` | `long` | `uint32_t` | Accessed via `lwz` at r18+0 |
+| `last_addr`, `interp_addr` | `unsigned long` | `uint32_t` | Accessed via `lwz` at r20+0 |
+| `delay_slot` | `unsigned long` | `uint32_t` | Accessed via embedded address |
+
+`reg[36]` stays `long long` (8 bytes) — correct, as recompiled code accesses low 32 bits at offset `i*8+4` on big-endian.
+
+### Build system
+
+Pass `-DPPC_DYNAREC=ON` to cmake. The `3rdParty/CMakeLists.txt` propagates:
+- `PPC_DYNAREC=$<BOOL:${PPC_DYNAREC}>` to core Makefile
+- `HOST_CPU=powerpc64 BIG_ENDIAN=1` (via `PPC_MAKE_FLAGS`) to all Makefile-based plugins when cross-compiling
+- `override NO_ASM := 1` forced for all PPC targets (no assembly source available)
+
+## Plugin compatibility (PPC64 BE)
+
+| Plugin | Build | Runtime | Notes |
+|--------|-------|---------|-------|
+| `mupen64plus-core` | **OK** | **OK** | PPC_DYNAREC enabled via cmake option |
+| `mupen64plus-rsp-hle` | **OK** | **OK** | Endian-aware via `M64P_BIG_ENDIAN` memory macros |
+| `mupen64plus-rsp-cxd4` | **OK** (scalar) | **OK** | SSE2 path auto-disabled; scalar fallback performs all ops |
+| `mupen64plus-video-GLideN64` | **OK** | **OK** | OpenGL-based; `xxHash` has PPC64 BE detection |
+| `mupen64plus-video-parallel` | **OK** | **N/A** (no Vulkan on G5) | SSE2 guarded with `#ifdef __SSE2__`, has scalar fallback |
+| `mupen64plus-input-raphnetraw` | **OK** | **OK** | No arch-specific code |
+| `RMG-Audio` | **OK** | **OK** | Endian-aware via `SDL_BYTEORDER` |
+| `mupen64plus-rsp-parallel` | **BLOCKED** | **N/A** | Unconditional SSE2 in `rsp_core.cpp` — disabled when `PPC_DYNAREC=ON` |
+
+### Makefile warning fixes
+Changed `$(warning ...)` to `$(info ...)` with "supported by RMG" for PPC blocks in:
+- `mupen64plus-core/projects/unix/Makefile` (3 PPC blocks)
+- `mupen64plus-rsp-hle/projects/unix/Makefile` (2 PPC blocks)
+- `mupen64plus-rsp-cxd4/projects/unix/Makefile` (2 PPC blocks)
