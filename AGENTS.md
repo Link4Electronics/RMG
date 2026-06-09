@@ -153,6 +153,7 @@ PPC64 has 8-byte `long` and `unsigned long`. The recompiled PPC code uses 32-bit
 | `lwz` used for LR restore (32-bit on PPC64) | Changed to `ld` (64-bit) | `MIPS-to-PPC.c` | 1095, 1912 |
 | **`bl` ±32 MB range exceeded**: mmap'd code buffer can be 575+ MB from library text segment; all 14 CALL jumps silently overflow 24-bit LI field and jump to garbage | Replaced all `EMIT_B(add_jump(..., 1, 1), 0, 1)` with `emit_64bit_call()` — loads full 64-bit address into r12, `mtctr` + `bctrl` for unlimited range | `MIPS-to-PPC.c` | `emit_64bit_call()` at line ~37, 14 call sites across file |
 | **FAILSAFE_REC_NO_VM not set**: fast memory path (`genCallDynaMemVM` lines 1947-2073) emits direct PPC loads/stores at N64 KSEG1 addresses `(addr & 0x1FFFFFFF) \| 0x40000000` — unmapped on Linux | Set `failsafeRec \|= FAILSAFE_REC_NO_VM` in `ppc_dynarec_init()` to force slow path via `dyna_mem()` C function | `ppc_dynarec.c` | 488 |
+| **Register allocator uses r2/r13 on PPC64 ELFv2**: r2=TOC pointer, r13=thread pointer/small data area. If allocator maps a MIPS GPR to r2/r13, all C function calls from recompiled code have corrupted TOC/DSA. | Set `availableRegsDefault[2]=0` and `availableRegsDefault[13]=0` in `Register-Cache.c` to reserve them. Only r24-r31 are now available for MIPS GPR mapping. | `Register-Cache.c` | 13-17 |
 
 The `emit_64bit_call()` helper uses r12 (consistent with PPC64 ELFv2 ABI for function entry point):
 ```c
