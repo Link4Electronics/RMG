@@ -395,7 +395,18 @@ void GBIInfo::loadMicrocode(u32 uc_start, u32 uc_dstart, u16 uc_dsize)
 	current.type = NONE;
 
 	// See if we can identify it by CRC
+#if defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+	// On BE hosts, RDRAM stores data in N64 big-endian byte order.
+	// CRC_Calculate_Strict computes a byte-by-byte CRC that was designed
+	// for LE hosts; swap each 32-bit word to LE for correct matching.
+	u32 uc_code[1024];
+	memcpy(uc_code, &RDRAM[uc_start & 0x1FFFFFFF], sizeof(uc_code));
+	for (u32 i = 0; i < 1024; ++i)
+		uc_code[i] = __builtin_bswap32(uc_code[i]);
+	const u32 uc_crc = CRC_Calculate_Strict(0xFFFFFFFF, (const unsigned char*)uc_code, sizeof(uc_code));
+#else
 	const u32 uc_crc = CRC_Calculate_Strict( 0xFFFFFFFF, &RDRAM[uc_start & 0x1FFFFFFF], 4096 );
+#endif
 	SpecialMicrocodeInfo infoToSearch;
 	infoToSearch.crc = uc_crc;
 	auto it = std::lower_bound(specialMicrocodes.begin(), specialMicrocodes.end(), infoToSearch,

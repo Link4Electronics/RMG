@@ -101,6 +101,16 @@ const volatile unsigned char One2Eight[2] =
 
 void UnswapCopyWrap(const u8 *src, u32 srcIdx, u8 *dest, u32 destIdx, u32 destMask, u32 numBytes)
 {
+#if defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+	// On big-endian hosts, RDRAM stores bytes in native N64 big-endian order.
+	// Just copy bytes directly with wrapping.
+	for (u32 i = 0; i < numBytes; ++i)
+		dest[(destIdx + i) & destMask] = src[srcIdx + i];
+#else
+	// On little-endian hosts, RDRAM stores bytes in host byte order (reversed
+	// relative to N64). Reverse byte order within each 32-bit word to restore
+	// the N64 big-endian format.
+
 	// copy leading bytes
 	u32 leadingBytes = srcIdx & 3;
 	if (leadingBytes != 0) {
@@ -138,6 +148,7 @@ void UnswapCopyWrap(const u8 *src, u32 srcIdx, u8 *dest, u32 destIdx, u32 destMa
 			--srcIdx;
 		}
 	}
+#endif
 }
 
 void DWordInterleaveWrap(u32 *src, u32 srcIdx, u32 srcMask, u32 numQWords)
