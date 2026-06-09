@@ -75,6 +75,7 @@ void       set_jump_special(int which, int new_jump);
 
 PowerPC_func* recompile_block(PowerPC_block* ppc_block, unsigned int addr);
 PowerPC_block* blocks_get(unsigned int idx);
+void blocks_set(unsigned int idx, PowerPC_block* block);
 void init_block(PowerPC_block* ppc_block);
 void deinit_block(PowerPC_block* ppc_block);
 void invalidate_block(PowerPC_block* ppc_block);
