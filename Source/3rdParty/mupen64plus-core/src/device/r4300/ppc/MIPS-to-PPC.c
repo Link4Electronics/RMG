@@ -111,8 +111,7 @@ static inline int check_delaySlot(void){
 
 void start_new_block(void){
     invalidateRegisters();
-    unget_last_src();
-    if(mips_is_jump(get_next_src())) delaySlotNext = 2;
+    if(mips_is_jump(peek_next_src())) delaySlotNext = 2;
     else delaySlotNext = 0;
 }
 void start_new_mapping(void){
