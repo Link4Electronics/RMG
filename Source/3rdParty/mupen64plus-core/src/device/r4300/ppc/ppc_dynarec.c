@@ -127,8 +127,7 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
           "r" (reg_cop1_simple), "r" (reg_cop1_double),
           "r" (&FCR31), "r" (rdram_base),
           "r" (&last_addr), "r" (&next_interupt),
-          "r" (func)
-        : "memory");
+          "r" (func));
 
     __asm__ volatile(
         "bl     .+4       \n"
@@ -146,10 +145,12 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
         "ld     1, 0(1)   \n"
         : "=r" (naddr), "=r" (link_branch), "=r" (return_addr),
           "=r" (last_func)
-        : "r" (code)
+        : "r" (code),
+          "r" (r14_val), "r" (r15_val), "r" (r16_val), "r" (r17_val),
+          "r" (r18_val), "r" (r19_val), "r" (r20_val), "r" (r21_val),
+          "r" (r22_val), "r" (r23_val)
         : "cr0", "cr2",
             "8","9","10","11","12",
-            "14","15","16","17","18","19","20","21","22","23",
             "24","25","26","27","28","29","30","31","ctr","lr",
             "%fr14","%fr15","%fr16","%fr17","%fr18","%fr19","%fr20","%fr21","%fr22","%fr23","%fr24","%fr25","%fr26","%fr27");
 
