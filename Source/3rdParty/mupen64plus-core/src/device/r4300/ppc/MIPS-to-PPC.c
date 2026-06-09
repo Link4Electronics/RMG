@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -41,7 +42,7 @@ static void emit_64bit_call(uintptr_t target) {
     EMIT_LIS(12, (t >> 48) & 0xFFFF);
     EMIT_ORI(12, 12, (t >> 32) & 0xFFFF);
     GEN_RLDICR(tmp, 12, 12, 32, 31, 0);
-    fprintf(stderr, "[RLDICR] tmp=0x%08X (target=0x%lX)\n", tmp, t);
+    fprintf(stderr, "[RLDICR] tmp=0x%08X (target=0x%016lX)\n", tmp, (unsigned long)t);
     set_next_dst(tmp);
     EMIT_ORIS(12, 12, (t >> 16) & 0xFFFF);
     EMIT_ORI(12, 12, t & 0xFFFF);
