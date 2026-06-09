@@ -248,6 +248,7 @@ void dynarec(unsigned int address){
 
 unsigned int decodeNInterpret(MIPS_instr mips, unsigned int pc,
                               int isDelaySlot){
+    fprintf(stderr, "[decodeNInterpret] op=0x%02X mips=0x%08X pc=0x%08X ds=%d\n", MIPS_GET_OPCODE(mips), mips, pc, isDelaySlot);
     unsigned int op = MIPS_GET_OPCODE(mips);
     delay_slot = isDelaySlot;
     interp_addr = pc;
@@ -361,8 +362,10 @@ static void write_rmg_word(uint32_t vaddr, uint32_t val, uint32_t mask) {
 #define BE_INSERT_BYTE(w, val, b)  ((w) = ((w) & ~(0xFFU  << (24 - ((b)<<3)))) | (((uint32_t)(val) & 0xFFU)  << (24 - ((b)<<3))))
 #define BE_INSERT_HWORD(w, val, b) ((w) = ((w) & ~(0xFFFFU << (16 - ((b)<<4)))) | (((uint32_t)(val) & 0xFFFFU) << (16 - ((b)<<4))))
 
+static int memdbg=0;
 unsigned int dyna_mem(unsigned int value, unsigned int addr,
                       memType type, unsigned int pc, int isDelaySlot){
+    if (++memdbg <= 10) fprintf(stderr, "[dyna_mem] type=%d addr=0x%08X pc=0x%08X\n", type, addr, pc);
     uint32_t wval = 0;
     uint64_t dval = 0;
     interp_addr = pc;
