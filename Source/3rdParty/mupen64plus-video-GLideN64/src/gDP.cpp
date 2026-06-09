@@ -581,8 +581,10 @@ void gDPLoadTile(u32 tile, u32 uls, u32 ult, u32 lrs, u32 lrt)
 				UnswapCopyWrap(RDRAM, address, reinterpret_cast<u8*>(TMEM), tmemAddr << 3, 0xFFF, RDRAMSize - address);
 			else
 				UnswapCopyWrap(RDRAM, address, reinterpret_cast<u8*>(TMEM), tmemAddr << 3, 0xFFF, bpr);
+	#if !defined(__BIG_ENDIAN__) && (!defined(__BYTE_ORDER__) || __BYTE_ORDER__ != __ORDER_BIG_ENDIAN__)
 			if (y & 1)
 				DWordInterleaveWrap(reinterpret_cast<u32*>(TMEM), tmemAddr << 1, 0x3FF, qwpr);
+#endif
 
 			address += gDP.textureImage.bpl;
 			tmemAddr += line;
@@ -620,11 +622,11 @@ void gDPLoadBlock32(u32 uls,u32 lrs, u32 dxt)
 			t = ((j >> 11) & 1) ? 3 : 1;
 			if (t != oldt)
 				i += line;
-			ptr = ((tb + i) ^ E_XOR(t)) & 0x3ff;
+			ptr = ((tb + i) ^ t) & 0x3ff;
 			c = src[addr + i];
 			tmem16[ptr] = c >> 16;
 			tmem16[ptr | 0x400] = c & 0xffff;
-			ptr = ((tb + i + 1) ^ E_XOR(t)) & 0x3ff;
+			ptr = ((tb + i + 1) ^ t) & 0x3ff;
 			c = src[addr + i + 1];
 			tmem16[ptr] = c >> 16;
 			tmem16[ptr | 0x400] = c & 0xffff;

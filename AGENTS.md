@@ -345,7 +345,36 @@ However, any struct that is read via a cast AND then accessed with XOR patterns 
 
 10. **`sdl_backend.cpp:101`** — Changed hardcoded `SDL_AUDIO_S16LE` to `SDL_AUDIO_S16`. RDRAM stores audio samples in host byte order. On LE hosts `SDL_AUDIO_S16` == `SDL_AUDIO_S16LE` (correct); on BE hosts it becomes `SDL_AUDIO_S16BE` (correct). Previously hardcoded LE caused each 16-bit sample to have reversed bytes on BE → static noise.
 
-### Current status (after GLideN64 endian accessor fixes)
+### Fixes applied this session (Jun 9)
+
+#### 1. CRITICAL: CI4/CI8/CI16 palette reads used wrong byte offset on BE
+
+**Symptom:** SM64 renders black screen. All textured surfaces use CI4 textures with palette lookup. Palette entries read as zero → transparent black → nothing visible.
+
+**Root cause:** `TMEM` is `u64[512]`. The code `TMEM[idx] & 0xFFFF` reads a u64 then masks to low 16 bits. On LE this hits bytes 0-1 of the u64 (where the palette entry was written). On BE it hits bytes 6-7 (the last 2 bytes of the u64 — uninitialized/zero). The palette entry is always at bytes 0-1 of the u64 regardless of endianness.
+
+**Fix:** Changed all 28 occurrences of `TMEM[idx] & 0xFFFF` to `((u16*)TMEM)[idx << 2]` — reads the correct u16 at bytes 0-1 on both LE and BE. `Textures.cpp`.
+
+#### 2. gDPLoadBlock32: E_XOR(t) disabled TMEM interleave on BE
+
+**Symptom:** `E_XOR(t)` with `t=1` or `t=3` maps both to 0 on BE, completely disabling the TMEM interleave pattern. Causes incorrect TMEM row ordering for block-loaded textures.
+
+**Root cause:** Variable `t` is a TMEM interleave value (1 or 3), not an endian XOR. TMEM interleave works the same regardless of host endianness — it's a u16 index XOR, not a byte-order operation.
+
+**Fix:** Reverted `E_XOR(t)` → `t`. `gDP.cpp:623,627`.
+
+#### 3. DWordInterleaveWrap called on BE after NOP UnswapCopyWrap
+
+**Symptom:** On odd TMEM rows during gDPLoadTile, `DWordInterleaveWrap` swaps adjacent u32 values within each u64. On LE this corrects a side effect of `UnswapCopyWrap`. On BE, `UnswapCopyWrap` is NOP (no byte reversal), so `DWordInterleaveWrap` corrupts the data on odd rows.
+
+**Fix:** Guarded with `#if !defined(__BIG_ENDIAN__)` — skipped entirely on BE. `gDP.cpp:584-586`.
+
+### Known non-issues (verified)
+
+- **swapword double-swap** in CI4/CI8 TLUT path: TLUT load writes `swapword(RDRAM_u16)`, palette read does `swapword(extracted_u16)` in `RGBA5551_RGBA8888`. This double-swap cancels identically on both LE and BE. On LE, RDRAM stores host-order u16 = N64 value → swapword → TMEM → swapword → original. On BE, same flow (N64 value → swapword → TMEM → swapword → original). **No fix needed.**
+- **swapword in direct 16-bit and 32-bit paths:** Same double-swap analysis applies. The swapword is a pixel-format conversion step, not an endian compensation.
+
+### Status: Three more endian bugs fixed in GLideN64
 
 **SM64 boots** (ucode recognized) but **black screen + static audio** status unchanged. All LE-specific XOR byte-swap patterns in critical SM64 rendering paths (gSP, gDP, GraphicsDrawer, RSP_LoadMatrix, BufferCopy) have been wrapped with endian-aware macros. The next compile/test cycle will reveal whether the black screen was caused by these XOR patterns or if additional issues remain.
 
@@ -370,10 +399,10 @@ Pass `-DPPC_DYNAREC=ON` to cmake. The `3rdParty/CMakeLists.txt` propagates:
 | `mupen64plus-core` | **OK** | **OK** | Pure/cached interpreter working; ucode crash fixed (RDRAMSize fix); PPC_DYNAREC enabled via cmake option but on hold |
 | `mupen64plus-rsp-hle` | **OK** | **OK** | Endian-aware via `M64P_BIG_ENDIAN` memory macros (XOR-based accessors) |
 | `mupen64plus-rsp-cxd4` | **OK** (scalar) | **OK** | SSE2 path auto-disabled; scalar fallback performs all ops |
-| `mupen64plus-video-GLideN64` | **OK** | **BROKEN** | Boots SM64 but black screen + static audio. LE-specific XOR byte-swap patterns corrupt vertex/light/matrix/framebuffer data on BE. uc_code CRC + UnswapCopyWrap fixes applied. | |
+| `mupen64plus-video-GLideN64` | **OK** | **BROKEN** | Boots SM64 but black screen. LE-specific XOR byte-swap patterns corrupt vertex/light/matrix/framebuffer data on BE. uc_code CRC + UnswapCopyWrap + TMEM palette read + gDPLoadBlock32 + DWordInterleaveWrap fixes applied. Audio works separately. | |
 | `mupen64plus-video-parallel` | **OK** | **N/A** (no Vulkan on G5) | SSE2 guarded with `#ifdef __SSE2__`, has scalar fallback |
 | `mupen64plus-input-raphnetraw` | **OK** | **OK** | No arch-specific code |
-| `RMG-Audio` | **OK** | Tentative** | Endian-aware via `SDL_BYTEORDER`; noise may also stem from mismatched interleave order or corrupted RDRAM buffers |
+| `RMG-Audio` | **OK** | **OK** | Works after `SDL_AUDIO_S16LE`→`SDL_AUDIO_S16` (detects host endian automatically) |
 | `mupen64plus-rsp-parallel` | **BLOCKED** | **N/A** | Unconditional SSE2 in `rsp_core.cpp` — disabled when `PPC_DYNAREC=ON` |
 
 ### Makefile warning fixes
@@ -388,12 +417,18 @@ Changed `$(warning ...)` to `$(info ...)` with "supported by RMG" for PPC blocks
 
 **Primary: Pure interpreter + GLideN64 video plugin** — get SM64 to render correctly on PPC64 BE.
 
-Status: SM64 boots (ucode recognized after CRC/UnswapCopyWrap fixes) but black screen + static audio remains. All LE-specific XOR byte-swap patterns in critical rendering paths (gSP, gDP, GraphicsDrawer, RSP_LoadMatrix, BufferCopy) have been wrapped with endian-aware macros. Next compile/test cycle will reveal if additional issues remain.
+Status: SM64 boots (ucode recognized) but black screen remains. **Audio now works** (SDL_AUDIO_S16LE→S16). All LE-specific XOR byte-swap patterns in critical rendering paths (gSP, gDP, GraphicsDrawer, RSP_LoadMatrix, BufferCopy) wrapped with endian-aware macros. Three additional endian bugs fixed this session:
+1. **CRITICAL: TMEM palette reads** used u64 indexing — read wrong bytes on BE → transparent black textures
+2. **gDPLoadBlock32** `E_XOR(t)` disabled TMEM interleave on BE
+3. **DWordInterleaveWrap** called on BE after NOP UnswapCopyWrap, corrupting odd TMEM rows
 
-**Secondary: PPC64 dynarec** — on hold until interpreter produces correct video/audio output.
+Next compile/test cycle will reveal if these fix the black screen.
+
+**Secondary: PPC64 dynarec** — on hold until interpreter produces correct video output.
 
 Known fixes needed:
-1. ~~Systematic endian-aware accessor macros in GLideN64~~ (DONE — E16_IDX/E16_ADDR/E8_OFF/E_XOR macros deployed across critical SM64 rendering paths)
-2. Verify RMG-Audio endian handling
-3. After GLideN64 renders correctly, verify audio output
-4. Once interpreter is fully functional, return to PPC dynarec testing
+1. ~~Systematic endian-aware accessor macros in GLideN64~~ (DONE)
+2. ~~Verify RMG-Audio endian handling~~ (DONE — works)
+3. ~~Fix TMEM palette reads~~ (DONE — CRITICAL for black screen)
+4. After GLideN64 renders correctly, verify audio output
+5. Once interpreter is fully functional, return to PPC dynarec testing
