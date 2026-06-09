@@ -95,13 +95,13 @@ All 11 PPC dynarec source files created in `device/r4300/ppc/` (from mupen64-360
 
 | File | Lines | Role |
 |------|-------|------|
-| `MIPS-to-PPC.c` | 2098 | MIPS→PPC instruction translator |
-| `PowerPC.h` | 1156 | PPC instruction encoding macros |
-| `ppc_dynarec.c` | 517 | Main entry: `dynarec()` loop, `decodeNInterpret()`, `dyna_mem()`, trampoline |
+| `MIPS-to-PPC.c` | 2098+ | MIPS→PPC instruction translator (+ `emit_64bit_call`) |
+| `PowerPC.h` | 1156 | PPC instruction encoding macros (~200 opcodes) |
+| `ppc_dynarec.c` | 558 | Main entry: `dynarec()` loop, `decodeNInterpret()`, `dyna_mem()`, trampoline |
 | `Recompile.h` | 318 | EMIT_* macros, block compilation interface |
 | `MIPS.h` | 279 | MIPS opcode decoding helpers |
 | `Recomp-Cache.c` | 256 | Recompiled code cache with LRU |
-| `Recompile.c` | 200 | Block compilation, jump fixup |
+| `Recompile.c` | 382 | Block compilation, jump fixup, `genJumpPad()` LR restore fix |
 | `Register-Cache.c` | 345 | GPR/FPR register allocator |
 | `FuncTree.c` | 61 | BST for recompiled block lookup |
 | `ppc_dynarec_compat.h` | 69 | Shim: extern globals, inline wrappers |
@@ -143,6 +143,31 @@ PPC64 has 8-byte `long` and `unsigned long`. The recompiled PPC code uses 32-bit
 | `delay_slot` | `unsigned long` | `uint32_t` | Accessed via embedded address |
 
 `reg[36]` stays `long long` (8 bytes) — correct, as recompiled code accesses low 32 bits at offset `i*8+4` on big-endian.
+
+### PPC64 bugs found during bringup
+
+| Bug | Fix | File | Lines |
+|-----|-----|------|-------|
+| `get_physical_addr()` returned loaded data values instead of translated addresses | Added proper TLB address translation path | `ppc_dynarec.c` | 533-544 |
+| `genJumpPad()` emitted `BLR` without restoring LR | Added `LD r0, DYNAOFF_LR(r1)` + `MTLR r0` before `BLR` | `Recompile.c` | 173-174 |
+| `lwz` used for LR restore (32-bit on PPC64) | Changed to `ld` (64-bit) | `MIPS-to-PPC.c` | 1095, 1912 |
+| **`bl` ±32 MB range exceeded**: mmap'd code buffer can be 575+ MB from library text segment; all 14 CALL jumps silently overflow 24-bit LI field and jump to garbage | Replaced all `EMIT_B(add_jump(..., 1, 1), 0, 1)` with `emit_64bit_call()` — loads full 64-bit address into r12, `mtctr` + `bctrl` for unlimited range | `MIPS-to-PPC.c` | `emit_64bit_call()` at line ~37, 14 call sites across file |
+| **FAILSAFE_REC_NO_VM not set**: fast memory path (`genCallDynaMemVM` lines 1947-2073) emits direct PPC loads/stores at N64 KSEG1 addresses `(addr & 0x1FFFFFFF) \| 0x40000000` — unmapped on Linux | Set `failsafeRec \|= FAILSAFE_REC_NO_VM` in `ppc_dynarec_init()` to force slow path via `dyna_mem()` C function | `ppc_dynarec.c` | 488 |
+
+The `emit_64bit_call()` helper uses r12 (consistent with PPC64 ELFv2 ABI for function entry point):
+```c
+static void emit_64bit_call(uintptr_t target) {
+    PowerPC_instr tmp;
+    uint64_t t = (uint64_t)target;
+    EMIT_LIS(12, (t >> 48) & 0xFFFF);
+    EMIT_ORI(12, 12, (t >> 32) & 0xFFFF);
+    GEN_RLDICR(tmp, 12, 12, 32, 31, 0); set_next_dst(tmp);
+    EMIT_ORIS(12, 12, (t >> 16) & 0xFFFF);
+    EMIT_ORI(12, 12, t & 0xFFFF);
+    EMIT_MTCTR(12);
+    EMIT_BCTRL(0);
+}
+```
 
 ### Build system
 
