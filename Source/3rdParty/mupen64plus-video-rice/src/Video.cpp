@@ -576,7 +576,7 @@ extern "C" {
 #endif
 
 /* Mupen64Plus plugin functions */
-EXPORT m64p_error CALL PluginStartup(m64p_dynlib_handle CoreLibHandle, void *Context,
+extern "C" EXPORT m64p_error CALL PluginStartup(m64p_dynlib_handle CoreLibHandle, void *Context,
                                    void (*DebugCallback)(void *, int, const char *))
 {
     if (l_PluginInit)
@@ -674,7 +674,7 @@ EXPORT m64p_error CALL PluginStartup(m64p_dynlib_handle CoreLibHandle, void *Con
     return M64ERR_SUCCESS;
 }
 
-EXPORT m64p_error CALL PluginShutdown(void)
+extern "C" EXPORT m64p_error CALL PluginShutdown(void)
 {
     if (!l_PluginInit)
         return M64ERR_NOT_INIT;
@@ -697,7 +697,7 @@ EXPORT m64p_error CALL PluginShutdown(void)
     return M64ERR_SUCCESS;
 }
 
-EXPORT m64p_error CALL PluginGetVersion(m64p_plugin_type *PluginType, int *PluginVersion, int *APIVersion, const char **PluginNamePtr, int *Capabilities)
+extern "C" EXPORT m64p_error CALL PluginGetVersion(m64p_plugin_type *PluginType, int *PluginVersion, int *APIVersion, const char **PluginNamePtr, int *Capabilities)
 {
     /* set version info */
     if (PluginType != NULL)
@@ -723,7 +723,7 @@ EXPORT m64p_error CALL PluginGetVersion(m64p_plugin_type *PluginType, int *Plugi
 //-------------------------------------------------------------------------------------
 
 
-EXPORT void CALL ChangeWindow (void)
+extern "C" EXPORT void CALL ChangeWindow (void)
 {
     if( status.ToToggleFullScreen )
         status.ToToggleFullScreen = FALSE;
@@ -733,12 +733,12 @@ EXPORT void CALL ChangeWindow (void)
 
 //---------------------------------------------------------------------------------------
 
-EXPORT void CALL MoveScreen (int xpos, int ypos)
+extern "C" EXPORT void CALL MoveScreen (int xpos, int ypos)
 { 
 }
 
 //---------------------------------------------------------------------------------------
-EXPORT void CALL RomClosed(void)
+extern "C" EXPORT void CALL RomClosed(void)
 {
     TRACE0("To stop video");
     Ini_StoreRomOptions(&g_curRomInfo);
@@ -746,7 +746,7 @@ EXPORT void CALL RomClosed(void)
     TRACE0("Video is stopped");
 }
 
-EXPORT int CALL RomOpen(void)
+extern "C" EXPORT int CALL RomOpen(void)
 {
     /* Read RiceVideoLinux.ini file, set up internal variables by reading values from core configuration API */
     LoadConfiguration();
@@ -776,7 +776,7 @@ EXPORT int CALL RomOpen(void)
 
 
 //---------------------------------------------------------------------------------------
-EXPORT void CALL UpdateScreen(void)
+extern "C" EXPORT void CALL UpdateScreen(void)
 {
     if(options.bShowFPS)
     {
@@ -798,7 +798,7 @@ EXPORT void CALL UpdateScreen(void)
 
 //---------------------------------------------------------------------------------------
 
-EXPORT void CALL ViStatusChanged(void)
+extern "C" EXPORT void CALL ViStatusChanged(void)
 {
     g_CritialSection.Lock();
     SetVIScales();
@@ -807,7 +807,7 @@ EXPORT void CALL ViStatusChanged(void)
 }
 
 //---------------------------------------------------------------------------------------
-EXPORT void CALL ViWidthChanged(void)
+extern "C" EXPORT void CALL ViWidthChanged(void)
 {
     g_CritialSection.Lock();
     SetVIScales();
@@ -815,7 +815,7 @@ EXPORT void CALL ViWidthChanged(void)
     g_CritialSection.Unlock();
 }
 
-EXPORT int CALL InitiateGFX(GFX_INFO Gfx_Info)
+extern "C" EXPORT int CALL InitiateGFX(GFX_INFO Gfx_Info)
 {
     memset(&status, 0, sizeof(status));
     memcpy(&g_GraphicsInfo, &Gfx_Info, sizeof(GFX_INFO));
@@ -839,7 +839,7 @@ EXPORT int CALL InitiateGFX(GFX_INFO Gfx_Info)
     return(TRUE);
 }
 
-EXPORT void CALL ResizeVideoOutput(int width, int height)
+extern "C" EXPORT void CALL ResizeVideoOutput(int width, int height)
 {
     // save the new window resolution.  actual resizing operation is asynchronous (it happens later)
     status.gNewResizeWidth = width;
@@ -849,7 +849,7 @@ EXPORT void CALL ResizeVideoOutput(int width, int height)
 
 //---------------------------------------------------------------------------------------
 
-EXPORT void CALL ProcessRDPList(void)
+extern "C" EXPORT void CALL ProcessRDPList(void)
 {
     try
     {
@@ -863,7 +863,7 @@ EXPORT void CALL ProcessRDPList(void)
     }
 }   
 
-EXPORT void CALL ProcessDList(void)
+extern "C" EXPORT void CALL ProcessDList(void)
 {
     ProcessDListStep2();
 }   
@@ -889,7 +889,7 @@ EXPORT void CALL ProcessDList(void)
   output:   none
 *******************************************************************/ 
 
-EXPORT void CALL FBRead(uint32 addr)
+extern "C" EXPORT void CALL FBRead(uint32 addr)
 {
     g_pFrameBufferManager->FrameBufferReadByCPU(addr);
 }
@@ -909,7 +909,7 @@ EXPORT void CALL FBRead(uint32 addr)
   output:   none
 *******************************************************************/ 
 
-EXPORT void CALL FBWrite(uint32 addr, uint32 size)
+extern "C" EXPORT void CALL FBWrite(uint32 addr, uint32 size)
 {
     g_pFrameBufferManager->FrameBufferWriteByCPU(addr, size);
 }
@@ -936,7 +936,7 @@ output:   Values are return in the FrameBufferInfo structure
           Plugin can return up to 6 frame buffer info
  ************************************************************************/
 
-EXPORT void CALL FBGetFrameBufferInfo(void *p)
+extern "C" EXPORT void CALL FBGetFrameBufferInfo(void *p)
 {
     FrameBufferInfo * pinfo = (FrameBufferInfo *)p;
     memset(pinfo,0,sizeof(FrameBufferInfo)*6);
@@ -973,13 +973,13 @@ EXPORT void CALL FBGetFrameBufferInfo(void *p)
 }
 
 // Plugin spec 1.3 functions
-EXPORT void CALL ShowCFB(void)
+extern "C" EXPORT void CALL ShowCFB(void)
 {
     status.toShowCFB = true;
 }
 
 //void ReadScreen2( void *dest, int *width, int *height, int bFront )
-EXPORT void CALL ReadScreen2(void *dest, int *width, int *height, int bFront)
+extern "C" EXPORT void CALL ReadScreen2(void *dest, int *width, int *height, int bFront)
 {
     if (width == NULL || height == NULL)
         return;
@@ -1026,7 +1026,7 @@ EXPORT void CALL ReadScreen2(void *dest, int *width, int *height, int bFront)
 }
     
 
-EXPORT void CALL SetRenderingCallback(void (*callback)(int))
+extern "C" EXPORT void CALL SetRenderingCallback(void (*callback)(int))
 {
     renderCallback = callback;
 }
