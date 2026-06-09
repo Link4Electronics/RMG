@@ -1915,7 +1915,7 @@ static void genUpdateCount(int checkCount){
     }
     EMIT_STW(0, 9*4, DYNAREG_COP0);
     if(checkCount){
-        EMIT_CMPL(0, tmp, 2);
+        EMIT_CMPL(tmp, 0, 2);
     }
     unmapRegisterTemp(tmp);
 }

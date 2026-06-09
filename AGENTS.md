@@ -163,6 +163,22 @@ The `PPC_SET_SPR` macro itself (`(spr & 0x3FF) << 11`) is **correct** for standa
 
 **Fix:** Changed to `ld` (64-bit). `MIPS-to-PPC.c`.
 
+### Bug (avoided): `genUpdateCount()` CMPL operand order (INTENTIONALLY LEFT AS-IS)
+
+**Analysis:** The Count-vs-next_interrupt comparison uses `CMPL(tmp, 0, 2)` at `MIPS-to-PPC.c:1918`:
+- `GEN_CMPL(ppc, ra, rb, cr)` emits `cmpl cr, 0, ra, rb`
+- `EMIT_CMPL(tmp, 0, 2)` = `cmpl cr2, 0, rTmp, r0` — compares **next_interrupt** with **Count**
+- `BLELR(2,0)` at `MIPS-to-PPC.c:217` (BO=4, BI=CR2.GT) branches to LR when GT=0
+- So BLELR fires (returns to dispatcher) when `next_interrupt <= Count` — i.e., **exactly when an interrupt is due**
+
+Swapping to `EMIT_CMPL(0, tmp, 2)` would invert the sense: BLELR would fire when `Count <= next_interrupt` (returning too early, before any interrupt), and fall through when `Count > next_interrupt` (looping forever in backward jumps). **The original ordering is correct; keep `(tmp, 0, 2)`**.
+
+### Bug: Backward branch BLR safety net (FIXED)
+
+**Symptom:** Backward conditional branches could loop within the block without ever returning to the dispatcher if the Count check somehow fails (e.g., stale `next_interupt` global).
+
+**Fix:** At `MIPS-to-PPC.c:219-222`, for `offset < 0`: emit `LD r0, DYNAOFF_LR(1); MTLR r0; BLR` after the BC(nbo) branch. This guarantees every taken backward branch returns to the dispatcher, preventing infinite internal loops.
+
 ### Bug list reminder
 
 | Bug | File | Lines | Status |
@@ -176,10 +192,11 @@ The `PPC_SET_SPR` macro itself (`(spr & 0x3FF) << 11`) is **correct** for standa
 | `get_physical_addr()` | `ppc_dynarec.c` | 533-544 | FIXED |
 | `genJumpPad()` LR restore | `Recompile.c` | 173-174 | FIXED |
 | `lwz` LR on PPC64 | `MIPS-to-PPC.c` | 1095, 1912 | FIXED |
+| **Backward branch BLR** | `MIPS-to-PPC.c` | 219-222 | FIXED |
 
-### Remaining concerns
+### Known issues
 
-1. **Xenon-specific SPR values in other PowerPC.h macros** — Only `GEN_MTCTR`, `GEN_MFCTR`, `GEN_MTLR`, `GEN_MFLR` use non-standard SPR values; all other encodings (arithmetic, load/store, branch) are standard POWER-PC.
+1. **Stale `next_interupt` global**: After `gen_interrupt()` modifies `r4300->cp0.next_interrupt`, the global `next_interupt` (that r21 points to in recompiled code) is never synced back. The dispatcher at `ppc_dynarec.c:243` also reads the stale global. After the first interrupt fires, Count checks in recompiled blocks use the wrong comparison value.
 2. **Floating-point control** — `fesetround()` / `mtfsf` / `mffs` path needs runtime verification that rounding mode is set correctly for N64 FE_TOWARDZERO emulation.
 3. **No VMX128 in the CPU dynarec** — The recompiler emits only scalar PPC (add, lwz, stw, rlwinm, etc.). LVX/STVX/VOR macros are standard AltiVec and work on both G4/G5 and Xenon.
 
