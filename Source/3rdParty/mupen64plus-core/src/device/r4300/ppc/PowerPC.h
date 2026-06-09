@@ -15,15 +15,15 @@ typedef unsigned int PowerPC_instr;
 
 #define PPC_RD_MASK      PPC_REG_MASK
 #define PPC_RD_SHIFT     21
-#define PPC_SET_RD(instr,rd)         instr |= (rd&PPC_RD_MASK)         << PPC_RD_SHIFT
+#define PPC_SET_RD(instr,rd)         instr |= ((rd)&PPC_RD_MASK)         << PPC_RD_SHIFT
 
 #define PPC_RA_MASK      PPC_REG_MASK
 #define PPC_RA_SHIFT     16
-#define PPC_SET_RA(instr,ra)         instr |= (ra&PPC_RA_MASK)         << PPC_RA_SHIFT
+#define PPC_SET_RA(instr,ra)         instr |= ((ra)&PPC_RA_MASK)         << PPC_RA_SHIFT
 
 #define PPC_RB_MASK      PPC_REG_MASK
 #define PPC_RB_SHIFT     11
-#define PPC_SET_RB(instr,rb)         instr |= (rb&PPC_RB_MASK)         << PPC_RB_SHIFT
+#define PPC_SET_RB(instr,rb)         instr |= ((rb)&PPC_RB_MASK)         << PPC_RB_SHIFT
 
 #define PPC_OE_MASK      0x1
 #define PPC_OE_SHIFT     10
@@ -39,7 +39,7 @@ typedef unsigned int PowerPC_instr;
 
 #define PPC_IMMED_MASK   0xFFFF
 #define PPC_IMMED_SHIFT  0
-#define PPC_SET_IMMED(instr,immed)   instr |= (immed&PPC_IMMED_MASK)   << PPC_IMMED_SHIFT
+#define PPC_SET_IMMED(instr,immed)   instr |= ((immed)&PPC_IMMED_MASK)   << PPC_IMMED_SHIFT
 
 #define PPC_LI_MASK      0xFFFFFF
 #define PPC_LI_SHIFT     2

@@ -40,12 +40,12 @@ static int genCallDynaMemVM(int rs_reg, int rt_reg, memType type, int immed);
       get_src_pc() >= 0xC0000000))
 
 static inline unsigned short extractUpper16(void* address){
-    unsigned int addr = (unsigned int)address;
+    uintptr_t addr = (uintptr_t)address;
     return (addr>>16) + ((addr>>15)&1);
 }
 
 static inline short extractLower16(void* address){
-    unsigned int addr = (unsigned int)address;
+    uintptr_t addr = (uintptr_t)address;
     return addr&0x8000 ? (addr&0xffff)-0x10000 : addr&0xffff;
 }
 
@@ -128,6 +128,8 @@ void reset_code_addr(void){
     set_next_dst_override_val = 0;
 }
 
+static int (*gen_ops[64])(MIPS_instr);
+
 int convert(void){
     int needFlush = delaySlotNext;
     isDelaySlot = (delaySlotNext == 1);
@@ -142,6 +144,10 @@ int convert(void){
 
 static int NI(MIPS_instr mips){
     (void)mips;
+    return CONVERT_ERROR;
+}
+static int NI2(MIPS_instr mips, int dbl){
+    (void)mips; (void)dbl;
     return CONVERT_ERROR;
 }
 
@@ -1091,7 +1097,7 @@ static int ERET(MIPS_instr mips){
     EMIT_RLWINM(3, 3, 0, 31, 29);
     EMIT_STW(DYNAREG_ZERO, extractLower16(&llbit), 4);
     EMIT_STW(3, 12*4, DYNAREG_COP0);
-    EMIT_B(add_jump((int)(&check_interupt), 1, 1), 0, 1);
+    EMIT_B(add_jump((uintptr_t)(&check_interupt), 1, 1), 0, 1);
     EMIT_LWZ(0, DYNAOFF_LR, 1);
     EMIT_LWZ(3, 14*4, DYNAREG_COP0);
     EMIT_MTLR(0);
@@ -1749,10 +1755,10 @@ static int C_NGT_FP(MIPS_instr mips, int dbl){
 static int (*gen_cop1_fp[64])(MIPS_instr, int) = {
    ADD_FP    ,SUB_FP    ,MUL_FP   ,DIV_FP    ,SQRT_FP   ,ABS_FP    ,MOV_FP   ,NEG_FP    ,
    ROUND_L_FP,TRUNC_L_FP,CEIL_L_FP,FLOOR_L_FP,ROUND_W_FP,TRUNC_W_FP,CEIL_W_FP,FLOOR_W_FP,
-   NI        ,NI        ,NI       ,NI        ,NI        ,NI        ,NI       ,NI        ,
-   NI        ,NI        ,NI       ,NI        ,NI        ,NI        ,NI       ,NI        ,
-   CVT_S_FP  ,CVT_D_FP  ,NI       ,NI        ,CVT_W_FP  ,CVT_L_FP  ,NI       ,NI        ,
-   NI        ,NI        ,NI       ,NI        ,NI        ,NI        ,NI       ,NI        ,
+   NI2       ,NI2       ,NI2      ,NI2       ,NI2       ,NI2       ,NI2      ,NI2       ,
+   NI2       ,NI2       ,NI2      ,NI2       ,NI2       ,NI2       ,NI2      ,NI2       ,
+   CVT_S_FP  ,CVT_D_FP  ,NI2      ,NI2       ,CVT_W_FP  ,CVT_L_FP  ,NI2      ,NI2       ,
+   NI2       ,NI2       ,NI2      ,NI2       ,NI2       ,NI2       ,NI2      ,NI2       ,
    C_F_FP    ,C_UN_FP   ,C_EQ_FP  ,C_UEQ_FP  ,C_OLT_FP  ,C_ULT_FP  ,C_OLE_FP ,C_ULE_FP  ,
    C_SF_FP   ,C_NGLE_FP ,C_SEQ_FP ,C_NGL_FP  ,C_LT_FP   ,C_NGE_FP  ,C_LE_FP  ,C_NGT_FP
 };
@@ -1850,7 +1856,7 @@ static void genCallInterp(MIPS_instr mips){
     EMIT_LIS(4, get_src_pc()>>16);
     EMIT_ORI(3, 3, mips);
     EMIT_ORI(4, 4, get_src_pc());
-    EMIT_B(add_jump((int)(&decodeNInterpret), 1, 1), 0, 1);
+    EMIT_B(add_jump((uintptr_t)(&decodeNInterpret), 1, 1), 0, 1);
     EMIT_LWZ(0, DYNAOFF_LR, 1);
     EMIT_CMPI(3, 0, 6);
     EMIT_MTLR(0);
@@ -1908,7 +1914,7 @@ static void genCheckFP(void){
         EMIT_LIS(3, get_src_pc()>>16);
         EMIT_LI(4, isDelaySlot ? 1 : 0);
         EMIT_ORI(3, 3, get_src_pc());
-        EMIT_B(add_jump((int)(&dyna_check_cop1_unusable), 1, 1), 0, 1);
+        EMIT_B(add_jump((uintptr_t)(&dyna_check_cop1_unusable), 1, 1), 0, 1);
         EMIT_LWZ(0, DYNAOFF_LR, 1);
         EMIT_MTLR(0);
         EMIT_BLR(0);
@@ -1922,7 +1928,7 @@ void genCallDynaMem(memType type, int base, short immed){
     EMIT_LI(5, type);
     EMIT_ORI(6, 6, get_src_pc()+4);
     EMIT_LI(7, isDelaySlot ? 1 : 0);
-    EMIT_B(add_jump((int)(&dyna_mem), 1, 1), 0, 1);
+    EMIT_B(add_jump((uintptr_t)(&dyna_mem), 1, 1), 0, 1);
     EMIT_LWZ(0, DYNAOFF_LR, 1);
     EMIT_CMPI(3, 0, 6);
     EMIT_MTLR(0);
