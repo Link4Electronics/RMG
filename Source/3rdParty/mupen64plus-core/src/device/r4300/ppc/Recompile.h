@@ -162,6 +162,8 @@ int disassemble(unsigned int a, unsigned int op);
 {PowerPC_instr ppc;GEN_ADDI(ppc,rd,ra,immed);set_next_dst(ppc);}
 #define EMIT_RLWINM(rd,ra,sh,mb,me) \
 {PowerPC_instr ppc;GEN_RLWINM(ppc,rd,ra,sh,mb,me);set_next_dst(ppc);}
+#define EMIT_RLDICL(ra,rs,sh,mb) \
+{PowerPC_instr ppc;GEN_RLDICL(ppc,ra,rs,sh,mb,0);set_next_dst(ppc);}
 #define EMIT_RLWIMI(rd,ra,sh,mb,me) \
 {PowerPC_instr ppc;GEN_RLWIMI(ppc,rd,ra,sh,mb,me);set_next_dst(ppc);}
 #define EMIT_SRWI(rd,ra,sh) \

@@ -40,23 +40,24 @@ static void emit_64bit_call(uintptr_t target) {
     /*
      * Load full 64-bit address into r12, then mtctr + bctrl.
      *
-     * PPC64 sequence (6 instructions, 2 registers):
-     *   lis   r12, w1       -> r12[32:47] = w1
-     *   ori   r12, r12, w0  -> r12[48:63] = w0
-     *   lis   r11, w3       -> r11[32:47] = w3
-     *   ori   r11, r11, w2  -> r11[48:63] = w2
-     *   sldi  r11, r11, 32  -> r11 = w3_w2_0000_0000
+     * PPC64 sequence (8 instructions, 2 registers):
+     *   lis   r12, w1       -> r12 = EXTS(w1) << 16
+     *   rldicl r12, r12, 0, 32  -> clear sign-extension upper bits
+     *   ori   r12, r12, w0  -> r12 = 0x00000000w1w0
+     *   lis   r11, w3       -> r11 = EXTS(w3) << 16
+     *   rldicl r11, r11, 0, 32  -> clear sign-extension upper bits
+     *   ori   r11, r11, w2  -> r11 = 0x00000000w3w2
+     *   sldi  r11, r11, 32  -> r11 = w3w2_00000000
      *   or    r12, r12, r11 -> r12 = w3_w2_w1_w0
      *   mtctr r12
      *   bctrl
      *
-     * Why not the original Xenon 5-instruction sequence?
-     *   The original used (lis+ori+rldicr+oris+ori) which assumes 32-bit
-     *   pointers. On PPC64 with addresses >4GB, the 'oris' step overlaps
-     *   bits 32-47 which already contain the upper address half from the
-     *   rldicr. This corrupts the upper 32 bits. The corrected approach
-     *   builds lower and upper halves separately in two GPRs then ORs
-     *   them together.
+     * Why the rldicl after each lis?
+     *   On PPC64, 'lis' (addis rd,0,imm) sign-extends the 16-bit immediate
+     *   to 64 bits before shifting left by 16. If w1 >= 0x8000, the upper
+     *   32 bits get filled with 1s, corrupting the final address when the
+     *   target is > 4GB (shared library code). rldicl clears bits 0-31
+     *   (MSB-0), i.e. the upper 32 bits in LSB-0, restoring zero-extension.
      */
     uint64_t t = (uint64_t)target;
     uint16_t w0 =  t        & 0xFFFF;
@@ -66,8 +67,10 @@ static void emit_64bit_call(uintptr_t target) {
     PowerPC_instr tmp;
 
     EMIT_LIS(12, w1);
+    EMIT_RLDICL(12, 12, 0, 32);
     EMIT_ORI(12, 12, w0);
     EMIT_LIS(11, w3);
+    EMIT_RLDICL(11, 11, 0, 32);
     EMIT_ORI(11, 11, w2);
     GEN_RLDICR(tmp, 11, 11, 32, 31, 0);  /* sldi r11, r11, 32 */
     set_next_dst(tmp);

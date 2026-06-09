@@ -624,6 +624,18 @@ typedef unsigned int PowerPC_instr;
       ppc |= (1 << 1); \
       ppc |= ((rc) & 1); }
 
+#define GEN_RLDICL(ppc,ra,rs,sh,mb,rc) \
+    { ppc = NEW_PPC_INSTR(); \
+      ppc |= (30 << 26); \
+      ppc |= ((rs) & 0x1F) << 21; \
+      ppc |= ((ra) & 0x1F) << 16; \
+      ppc |= ((sh) & 0x1F) << 11; \
+      ppc |= ((mb) & 0x1F) << 6; \
+      ppc |= (((sh) >> 5) & 1) << 5; \
+      ppc |= (((mb) >> 5) & 1) << 4; \
+      ppc |= (0 << 1); \
+      ppc |= ((rc) & 1); }
+
 #define GEN_SLD(ppc,ra,rs,sh) \
     GEN_RLDICR(ppc,ra,rs,sh,0,0)
 
