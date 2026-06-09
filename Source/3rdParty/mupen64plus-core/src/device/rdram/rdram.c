@@ -136,7 +136,7 @@ static void map_corrupt_rdram(struct rdram* rdram, int corrupt)
 
 void init_rdram(struct rdram* rdram,
                 uint32_t* dram,
-                size_t dram_size,
+                uint32_t dram_size,
                 struct r4300_core* r4300)
 {
     rdram->dram = dram;
