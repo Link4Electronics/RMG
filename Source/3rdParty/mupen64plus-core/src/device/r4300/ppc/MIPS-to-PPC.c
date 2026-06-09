@@ -37,14 +37,41 @@ static int genCallDynaMemVM(int rs_reg, int rt_reg, memType type, int immed);
 
 /* 64-bit-safe call: loads full address and uses bctrl to reach any distance */
 static void emit_64bit_call(uintptr_t target) {
-    PowerPC_instr tmp;
+    /*
+     * Load full 64-bit address into r12, then mtctr + bctrl.
+     *
+     * PPC64 sequence (6 instructions, 2 registers):
+     *   lis   r12, w1       -> r12[32:47] = w1
+     *   ori   r12, r12, w0  -> r12[48:63] = w0
+     *   lis   r11, w3       -> r11[32:47] = w3
+     *   ori   r11, r11, w2  -> r11[48:63] = w2
+     *   sldi  r11, r11, 32  -> r11 = w3_w2_0000_0000
+     *   or    r12, r12, r11 -> r12 = w3_w2_w1_w0
+     *   mtctr r12
+     *   bctrl
+     *
+     * Why not the original Xenon 5-instruction sequence?
+     *   The original used (lis+ori+rldicr+oris+ori) which assumes 32-bit
+     *   pointers. On PPC64 with addresses >4GB, the 'oris' step overlaps
+     *   bits 32-47 which already contain the upper address half from the
+     *   rldicr. This corrupts the upper 32 bits. The corrected approach
+     *   builds lower and upper halves separately in two GPRs then ORs
+     *   them together.
+     */
     uint64_t t = (uint64_t)target;
-    EMIT_LIS(12, (t >> 48) & 0xFFFF);
-    EMIT_ORI(12, 12, (t >> 32) & 0xFFFF);
-    GEN_RLDICR(tmp, 12, 12, 32, 31, 0);
+    uint16_t w0 =  t        & 0xFFFF;
+    uint16_t w1 = (t >> 16) & 0xFFFF;
+    uint16_t w2 = (t >> 32) & 0xFFFF;
+    uint16_t w3 = (t >> 48) & 0xFFFF;
+    PowerPC_instr tmp;
+
+    EMIT_LIS(12, w1);
+    EMIT_ORI(12, 12, w0);
+    EMIT_LIS(11, w3);
+    EMIT_ORI(11, 11, w2);
+    GEN_RLDICR(tmp, 11, 11, 32, 31, 0);  /* sldi r11, r11, 32 */
     set_next_dst(tmp);
-    EMIT_ORIS(12, 12, (t >> 16) & 0xFFFF);
-    EMIT_ORI(12, 12, t & 0xFFFF);
+    EMIT_OR(12, 12, 11);
     EMIT_MTCTR(12);
     EMIT_BCTRL(0);
 }
