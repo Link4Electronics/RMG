@@ -618,8 +618,8 @@ typedef unsigned int PowerPC_instr;
       ppc |= ((rs) & 0x1F) << 21; \
       ppc |= ((ra) & 0x1F) << 16; \
       ppc |= ((sh) & 0x1F) << 11; \
-      ppc |= (((sh) >> 5) & 1) << 10; \
-      ppc |= ((me) & 0x1F) << 5; \
+      ppc |= ((me) & 0x1F) << 6; \
+      ppc |= (((sh) >> 5) & 1) << 5; \
       ppc |= (((me) >> 5) & 1) << 4; \
       ppc |= (1 << 1); \
       ppc |= ((rc) & 1); }
