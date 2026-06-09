@@ -216,7 +216,13 @@ static int branch(int offset, condition cond, int link, int likely){
         EMIT_STW(3, 0, DYNAREG_LADDR);
         EMIT_BLELR(2, 0);
         EMIT_BC(2, 0, 0, nbo, bi);
-        EMIT_B(add_jump(offset, 0, 0), 0, 0);
+        if(offset < 0){
+            EMIT_LD(0, DYNAOFF_LR, 1);
+            EMIT_MTLR(0);
+            EMIT_BLR(0);
+        } else {
+            EMIT_B(add_jump(offset, 0, 0), 0, 0);
+        }
     }
 
     if(delaySlot){
