@@ -109,7 +109,7 @@ PPC64 has 8-byte `long` and `unsigned long`. The recompiled PPC code uses 32-bit
 
 **Symptom:** Xenon assembler interprets `bl 4` as `bl .+4` (skip 1 instruction), but Linux GAS interprets it as `bl` to absolute address 4 — huge negative offset, skips `mtctr`, so `bctrl` hits uninitialized CTR (32-bit truncated address).
 
-**Fix:** Changed `bl 4` to `bl .+4` (standard GAS idiom). Also merged two separate asm blocks into one. `ppc_dynarec.c`.
+**Fix:** Changed `bl 4` to `bl .+4` (standard GAS idiom). Also merged two separate asm blocks (within the trampoline block) into one. `ppc_dynarec.c`.
 
 ### Bug: Xenon SPR encoding on G5 (FIXED — root cause of the crash)
 
@@ -199,6 +199,18 @@ Swapping to `EMIT_CMPL(0, tmp, 2)` would invert the sense: BLELR would fire when
 
 **Fix:** At `MIPS-to-PPC.c:219-222`, for `offset < 0`: emit `LD r0, DYNAOFF_LR(1); MTLR r0; BLR` after the BC(nbo) branch. This guarantees every taken backward branch returns to the dispatcher, preventing infinite internal loops.
 
+### Bug: `dyna_run()` split asm blocks cause GCC register corruption (FIXED)
+
+**Symptom:** First compiled block at `0xA4000040` executes and never returns — `dyna_run()` bctrl never comes back even though the compiled code has a BLR at the end.
+
+**Root cause:** Two separate `__asm__ volatile()` blocks in `dyna_run()`:
+1. First block sets up r14-r23 (declared clobbered → dead to GCC)
+2. Second block calls compiled code via `bctrl`, then captures outputs
+
+With optimization ≥ `-O1`, GCC's register allocator reuses r14-r23 (declared dead by first block) for the second block's input operands. When `code` gets assigned to r22, the compiled code (via `bctrl`) reads a corrupted `func` pointer — `EMIT_STW(3, 0, REG_LOCALRS)` writes to `code+0` instead of `func+0`, corrupting the code buffer or memory-mapped I/O, causing unpredictable behavior including infinite loops.
+
+**Fix:** Merged both asm blocks into one so register setup happens in the same block as the bctrl call. Operand renumbered: inputs %4-%13 (9 setup ptrs + code), outputs %0-%3 (naddr, link_branch, return_addr, last_func). `ppc_dynarec.c:98-137`.
+
 ### Bug list reminder
 
 | Bug | File | Lines | Status |
@@ -219,6 +231,7 @@ Swapping to `EMIT_CMPL(0, tmp, 2)` would invert the sense: BLELR would fire when
 | **GEN_BNE/GEN_BNELR BO encoding** | `PowerPC.h` | 565, 1125 | FIXED |
 | **MTFSFI immediate field position** | `PowerPC.h` | 1021-1026 | FIXED |
 | **HEAP_PARENT shift (>>2→>>1)** | `Recomp-Cache.c` | 46 | FIXED |
+| **Split asm blocks in dyna_run** | `ppc_dynarec.c` | 98-137 | FIXED |
 
 ### Known issues
 
