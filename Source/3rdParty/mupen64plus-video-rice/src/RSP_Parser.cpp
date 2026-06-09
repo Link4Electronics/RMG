@@ -1690,6 +1690,10 @@ void RDP_DLParser_Process(void)
     uint32 start = *(g_GraphicsInfo.DPC_START_REG);
     uint32 end = *(g_GraphicsInfo.DPC_END_REG);
 
+    fprintf(stderr, "RICE: RDP_DLParser_Process start=0x%08X end=0x%08X gDlistCount=%d\n",
+        start, end, status.gDlistCount);
+    fflush(stderr);
+
     gDlistStackPointer=0;
     gDlistStack[gDlistStackPointer].pc = start;
     gDlistStack[gDlistStackPointer].countdown = MAX_DL_COUNT;
