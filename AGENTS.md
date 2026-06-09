@@ -181,6 +181,18 @@ Swapping to `EMIT_CMPL(0, tmp, 2)` would invert the sense: BLELR would fire when
 
 **Fix:** Changed `get_src_pc() + (delaySlot ? 8 : 4)` to `get_src_pc() + 4` — which is always correct because `get_src_pc()` already accounts for the consumed delay slot. `MIPS-to-PPC.c:209-210`.
 
+### Bug: MTFSFI immediate field at wrong bit position (FIXED)
+
+**Symptom:** `GEN_MTFSFI` used `PPC_SET_IMMED` (shift=0, bits 0-15) for the immediate field, but `mtfsfi` in XFL-form places the U immediate at integer bits 16-22. When `set_rounding(PPC_ROUNDING_CEIL)` or `set_rounding(PPC_ROUNDING_FLOOR)` is called (e.g., by MIPS `ceil.w.s/d` or `floor.w.s/d`), the immediate value 2 or 3 corrupts the extended opcode field (bits 1-10), turning `mtfsfi` into a completely different instruction. TRUNC (value 0, using `FCTIWZ` bypass) and NEAREST (value 0) were unaffected.
+
+**Fix:** Replaced `PPC_SET_IMMED(ppc, (immed))` with `ppc |= ((immed) & 0xF) << 16` for correct placement at integer bits 16-19 (7-bit U field, lower 4 bits used). `PowerPC.h:1026`.
+
+### Bug: HEAP_PARENT shift wrong (FIXED)
+
+**Symptom:** `HEAP_PARENT(i) = ((i-1)>>2)` uses divide-by-4 instead of divide-by-2 (`(i-1)>>1`). In a binary min-heap, the parent of node i should be `(i-1)/2`. This meant nodes at indices >= 3 computed incorrect parent indices, breaking the LRU eviction ordering in the recompiled code cache. Hot code could be prematurely evicted.
+
+**Fix:** Changed `>>2` to `>>1`. `Recomp-Cache.c:46`.
+
 ### Bug: Backward branch BLR safety net (FIXED)
 
 **Symptom:** Backward conditional branches could loop within the block without ever returning to the dispatcher if the Count check somehow fails (e.g., stale `next_interupt` global).
@@ -205,6 +217,8 @@ Swapping to `EMIT_CMPL(0, tmp, 2)` would invert the sense: BLELR would fire when
 | **Stale `next_interupt` after interrupt** | `ppc_dynarec.c` | 246-247 | FIXED |
 | **`decodeNInterpret` sentinel** | `ppc_dynarec.c` | 732 | FIXED |
 | **GEN_BNE/GEN_BNELR BO encoding** | `PowerPC.h` | 565, 1125 | FIXED |
+| **MTFSFI immediate field position** | `PowerPC.h` | 1021-1026 | FIXED |
+| **HEAP_PARENT shift (>>2→>>1)** | `Recomp-Cache.c` | 46 | FIXED |
 
 ### Known issues
 

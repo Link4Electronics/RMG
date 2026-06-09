@@ -1023,7 +1023,7 @@ typedef unsigned int PowerPC_instr;
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_MTFSFI); \
       PPC_SET_CRF   (ppc, (field)); \
-      PPC_SET_IMMED (ppc, (immed)); }
+      ppc |= ((immed) & 0xF) << 16; }
 
 #define GEN_MTFSF(ppc,fields,fs) \
     { ppc = NEW_PPC_INSTR(); \
