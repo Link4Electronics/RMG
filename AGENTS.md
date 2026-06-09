@@ -426,11 +426,35 @@ Changed `$(warning ...)` to `$(info ...)` with "supported by RMG" for PPC blocks
 | Issue | Fix | Status |
 |-------|-----|--------|
 | Not listed in RMG | `extern "C" EXPORT` → `EXPORT` (removed redundant `extern "C"`); made `DXFrameBufferManager`/`OGLFrameBufferManager` virtual overrides inline in `FrameBuffer.h` (were undefined symbols on PPC64 `ld`) | **FIXED** |
-| Endian-correctness (BE) | TBD — may need similar endian-aware accessor macros as GLideN64 if rendering is corrupted | **UNKNOWN** |
+| Bitfield structs use LSB-first order (x86 assumption) | Reversed field order within each 32-bit word under `#if __BIG_ENDIAN__` in `UcodeDefs.h` for all 22 command structs | **FIXED** |
+
+### Root cause: bitfield packing direction on PPC64 BE
+
+GCC on PPC64 BE packs bitfields **MSB-first** (first-declared field → most significant bits of the word), while x86 packs **LSB-first** (first-declared field → least significant bits). The rice plugin's 22 command structs in `UcodeDefs.h` were all designed for x86 LSB-first packing, where `cmd:8` is declared LAST in each word to land at the MSB (bits 24–31) — which after LE byteswap of the N64 BE u32 correctly reads byte 0 of the RDRAM word (the opcode byte).
+
+On PPC64 BE MSB-first, declaring `cmd:8` last maps it to bits 7–0 (byte 3 of the BE word), which is never the opcode byte. The fix reverses every bitfield group within each 32-bit word on BE so `cmd:8` is declared FIRST, mapping to bits 31–24 = byte 0 = opcode.
+
+All 22 structs (`Gwords`, `GGBI0_Tri1`, `GGBI2_Tri1`, `GGBI2_Tri2`, `GGBI0_Ln3DTri2`, `GGBI1_Tri2`, `GGBI2_Line3D`, `GGBI0_Vtx`, `GGBI1_Vtx`, `GGBI2_Vtx`, `GSetImg`, `GSetColor`, `GGBI0_Dlist`, `GGBI0_Matrix`, `GGBI0_PopMatrix`, `GGBI2_Matrix`, `GGBI0_MoveWord`, `GGBI2_MoveWord`, `GTexture`, `Gloadtile`, `Gsettile`, `Gtexrect`) and the `GSetColor` RGBA/fillcolor union all have `#if __BIG_ENDIAN__` alternates.
+
+The main command dispatch (`currentUcodeMap[pgfx->words.w0 >> 24](pgfx)`) was unaffected because `>> 24` always reads the same byte (byte 0 of the BE word) regardless of host endianness — no endian compensation needed.
+
+### Trace diagnosis that identified the root cause
+
+Before the fix, trace output showed:
+- `GetTexture` always returns `addr=0x00000000 fmt=0 sz=0 w=1 h=1` (null texture)
+- Only one `ConvertTexture` call fires, for that null texture
+- `EndUpdate` never fires (texture upload to OpenGL never attempted)
+- Game freezes at `gDlistCount=77` with `screenUpdate=0 bScreenIsDrawn=1`
+
+These symptoms are consistent with `GSetImg` reading all zero fields (because `width:12` — declared first in the struct — reads bits 31–20 on BE = the cmd+fmt byte region instead of the width region), so the texture address is set to 0x00000000 and never resolves to real texture data.
 
 ### Known fixes needed
 1. ~~Wire rice into CMake build system~~ (DONE)
 2. ~~Fix DXFrameBufferManager undefined vtable symbol~~ (DONE)
-3. Verify rice renders SM64 correctly on PPC64 BE (next compile/test cycle)
-4. If black screen/corruption, apply BE endian fixes analogous to GLideN64 ones (RDRAM XOR patterns, TMEM access, etc.)
-5. Once video output works, optionally return to PPC dynarec testing
+3. ~~Fix bitfield struct endianness in UcodeDefs.h~~ (DONE)
+4. Verify rice renders SM64 correctly on PPC64 BE (next compile/test cycle)
+5. If black screen/corruption remains, investigate:
+   - `RSP_Parser.cpp` code that reads `gfx->words.w0` with `& 0xFF`, `>> 12`, `>> 16`, etc. — these shift operations on the u32 value are endian-safe
+   - RDRAM endian access via `g_pRDRAMu32[pc>>2]` (should be correct, uses host byte order)
+   - Any remaining struct-style access to RDRAM data not covered by the Gfx union
+6. Once video output works, optionally return to PPC dynarec testing
