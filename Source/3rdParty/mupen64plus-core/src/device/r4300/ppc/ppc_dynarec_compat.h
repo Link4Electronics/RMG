@@ -28,8 +28,8 @@ extern uint32_t next_interupt, CIC_Chip;
 extern int llbit;
 extern uint32_t delay_slot;
 
-#define hi (reg[32])
-#define lo (reg[33])
+#define RHI (reg[32])
+#define RLO (reg[33])
 #define local_rs (reg[34])
 #define local_rt (reg[35])
 
@@ -55,11 +55,6 @@ static inline unsigned long get_physical_addr(unsigned int vaddr) {
     if (r4300_read_aligned_word(ppc_dynarec_r4300, vaddr, &paddr))
         return paddr & 0x1FFFFFFF;
     return 0xFFFFFFFF;
-}
-
-/* do_SP_Task stub */
-static inline void do_SP_Task(int delayedDP, int cycles) {
-    (void)delayedDP; (void)cycles;
 }
 
 /* jump_to stub - used by recompiled code return */

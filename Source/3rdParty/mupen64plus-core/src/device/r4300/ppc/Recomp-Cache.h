@@ -21,6 +21,7 @@ void RecompCache_Link(PowerPC_func* src_func, PowerPC_instr* src_instr,
                       PowerPC_func* dst_func, PowerPC_instr* dst_instr);
 
 void RecompCache_Init(void);
+void remove_outgoing_links(PowerPC_func_node** node, PowerPC_func* func);
 unsigned int RecompCache_Allocated(void);
 void* MetaCache_Alloc(unsigned int size);
 void MetaCache_Free(void* ptr);

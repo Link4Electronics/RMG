@@ -42,7 +42,7 @@ char invalid_code[0x100000] = {0};
 int noCheckInterrupt = 0;
 int failsafeRec = 0;
 int llbit = 0;
-unsigned long delay_slot = 0;
+uint32_t delay_slot = 0;
 
 /* CP0 register convenience pointers */
 static struct cp0* ppc_cp0 = NULL;
@@ -62,7 +62,7 @@ static void sync_r4300_state(struct r4300_core* r4300) {
     for (i = 0; i < 32; i++) {
         reg_cop1_simple[i] = (float*)&r4300->cp1.regs[i];
         reg_cop1_double[i] = (double*)&r4300->cp1.regs[i];
-        reg_cop1_fgr_64[i] = r4300->cp1.regs[i];
+        reg_cop1_fgr_64[i] = r4300->cp1.regs[i].dword;
     }
     FCR31 = r4300->cp1.fcr31;
     FCR0  = r4300->cp1.fcr0;
@@ -221,19 +221,19 @@ unsigned int decodeNInterpret(MIPS_instr mips, unsigned int pc,
     interp_addr = pc;
 
     switch(op) {
-    case MIPS_OPCODE_CP0: {
+    case MIPS_OPCODE_COP0: {
         unsigned int rs = MIPS_GET_RS(mips);
         unsigned int rt = MIPS_GET_RT(mips);
         unsigned int rd = MIPS_GET_RD(mips);
-        if(rs >= MIPS_CP0_MFC0 && rs <= MIPS_CP0_CTC0) {
-            if(rs == MIPS_CP0_MFC0 || rs == MIPS_CP0_DMFC0)
+        if(rs >= MIPS_FRMT_MFC && rs <= MIPS_FRMT_CTC) {
+            if(rs == MIPS_FRMT_MFC || rs == MIPS_FRMT_DMFC)
                 reg[rt] = (long long)(int)reg_cop0[rd];
-            else if(rs == MIPS_CP0_CFC0)
+            else if(rs == MIPS_FRMT_CFC)
                 reg[rt] = (long long)(int)(rd == 0 ? 0x0F000000 : FCR31);
-            else if(rs == MIPS_CP0_MTC0 || rs == MIPS_CP0_DMTC0)
-                reg_cop0[rd] = (unsigned long)(unsigned int)reg[rt];
-            else if(rs == MIPS_CP0_CTC0) {
-                if(rd == 31) FCR31 = (unsigned int)reg[rt];
+            else if(rs == MIPS_FRMT_MTC || rs == MIPS_FRMT_DMTC)
+                reg_cop0[rd] = (uint32_t)reg[rt];
+            else if(rs == MIPS_FRMT_CTC) {
+                if(rd == 31) FCR31 = (uint32_t)reg[rt];
             }
         } else {
             /* TLB operations */
@@ -241,18 +241,18 @@ unsigned int decodeNInterpret(MIPS_instr mips, unsigned int pc,
             struct r4300_core* r4300 = ppc_dynarec_r4300;
             if(!r4300) return 0;
             switch(func) {
-            case MIPS_COP0_TLBR:
+            case MIPS_FUNC_TLBR:
                 break;
-            case MIPS_COP0_TLBWI:
+            case MIPS_FUNC_TLBWI:
                 tlb_map(&r4300->cp0.tlb, r4300->cp0.regs[CP0_INDEX_REG] & 0x3F);
                 break;
-            case MIPS_COP0_TLBWR:
+            case MIPS_FUNC_TLBWR:
                 r4300->cp0.regs[CP0_RANDOM_REG] = (rand() * 32) / RAND_MAX;
                 tlb_map(&r4300->cp0.tlb, r4300->cp0.regs[CP0_RANDOM_REG] & 0x3F);
                 break;
-            case MIPS_COP0_TLBP:
+            case MIPS_FUNC_TLBP:
                 break;
-            case MIPS_COP0_ERET:
+            case MIPS_FUNC_ERET:
                 break;
             }
         }
@@ -309,14 +309,14 @@ void check_invalidate_memory(unsigned int addr){
 }
 
 static void read_rmg_word(uint32_t vaddr, uint32_t* val) {
-    struct memory* mem = ppc_dynarec_r4300 ? &ppc_dynarec_r4300->memory : NULL;
+    struct memory* mem = ppc_dynarec_r4300 ? ppc_dynarec_r4300->mem : NULL;
     if(!mem) return;
     const struct mem_handler* h = mem_get_handler(mem, vaddr);
     mem_read32(h, vaddr, val);
 }
 
 static void write_rmg_word(uint32_t vaddr, uint32_t val, uint32_t mask) {
-    struct memory* mem = ppc_dynarec_r4300 ? &ppc_dynarec_r4300->memory : NULL;
+    struct memory* mem = ppc_dynarec_r4300 ? ppc_dynarec_r4300->mem : NULL;
     if(!mem) return;
     const struct mem_handler* h = mem_get_handler(mem, vaddr);
     mem_write32(h, vaddr, val, mask);

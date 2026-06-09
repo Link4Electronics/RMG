@@ -74,6 +74,7 @@ int        add_jump_special(int is_j);
 void       set_jump_special(int which, int new_jump);
 
 PowerPC_func* recompile_block(PowerPC_block* ppc_block, unsigned int addr);
+PowerPC_block* blocks_get(unsigned int idx);
 void init_block(PowerPC_block* ppc_block);
 void deinit_block(PowerPC_block* ppc_block);
 void invalidate_block(PowerPC_block* ppc_block);
@@ -307,12 +308,5 @@ int disassemble(unsigned int a, unsigned int op);
 {PowerPC_instr ppc;GEN_MFCR(ppc,rt);set_next_dst(ppc);}
 #define EMIT_MCRXR(bf) \
 {PowerPC_instr ppc;GEN_MCRXR(ppc,bf);set_next_dst(ppc);}
-
-#define EMIT_LVX(vd,ra,rb) \
-{PowerPC_instr ppc=0x7C0000CE;PPC_SET_RD(ppc,vd);PPC_SET_RA(ppc,ra);PPC_SET_RB(ppc,rb);set_next_dst(ppc);}
-#define EMIT_STVX(vs,ra,rb) \
-{PowerPC_instr ppc=0x7C0001CE;PPC_SET_RD(ppc,vs);PPC_SET_RA(ppc,ra);PPC_SET_RB(ppc,rb);set_next_dst(ppc);}
-#define EMIT_VOR(vd,va,vb) \
-{PowerPC_instr ppc=0x10000484;PPC_SET_RD(ppc,vd);PPC_SET_RA(ppc,va);PPC_SET_RB(ppc,vb);set_next_dst(ppc);}
 
 #endif
