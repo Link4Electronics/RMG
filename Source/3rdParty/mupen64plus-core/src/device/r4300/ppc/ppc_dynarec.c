@@ -98,37 +98,40 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
         "stdu   1, -32(1) \n"
         "mfcr   14        \n"
         "stw    14, 8(1)  \n"
-        "mr     14, %9    \n"
-        "mr     15, %10   \n"
-        "mr     16, %11   \n"
-        "mr     17, %12   \n"
-        "mr     18, %13   \n"
-        "mr     19, %14   \n"
-        "mr     20, %15   \n"
-        "mr     21, %16   \n"
-        "mr     22, %17   \n"
+        "mr     14, %0    \n"
+        "mr     15, %1    \n"
+        "mr     16, %2    \n"
+        "mr     17, %3    \n"
+        "mr     18, %4    \n"
+        "mr     19, %5    \n"
+        "mr     20, %6    \n"
+        "mr     21, %7    \n"
+        "mr     22, %8    \n"
         "addi   23, 0, 0  \n"
+        :: "r" (reg), "r" (reg_cop0),
+           "r" (reg_cop1_simple), "r" (reg_cop1_double),
+           "r" (&FCR31), "r" (rdram_base),
+           "r" (&last_addr), "r" (&next_interupt),
+           "r" (func)
+        : "14", "15", "16", "17", "18", "19", "20", "21", "22", "23");
+
+    __asm__ volatile(
         "bl     .+4       \n"
-        "mtctr  %0        \n"
+        "mtctr  %4        \n"
         "mflr   4         \n"
         "addi   4, 4, 28  \n"
         "std    4, 20(1)  \n"
         "sync             \n"
         "isync            \n"
         "bctrl            \n"
-        "mr     %1, 3     \n"
-        "ld     %3, 20(1) \n"
-        "mflr   %2        \n"
-        "mr     %4, 22    \n"
+        "mr     %0, 3     \n"
+        "ld     %2, 20(1) \n"
+        "mflr   %1        \n"
+        "mr     %3, 22    \n"
         "ld     1, 0(1)   \n"
         : "=r" (naddr), "=r" (link_branch), "=r" (return_addr),
           "=r" (last_func)
-        : "r" (code),
-          "r" (reg), "r" (reg_cop0),
-          "r" (reg_cop1_simple), "r" (reg_cop1_double),
-          "r" (&FCR31), "r" (rdram_base),
-          "r" (&last_addr), "r" (&next_interupt),
-          "r" (func)
+        : "r" (code)
         : "cr0", "cr2",
             "8","9","10","11","12",
             "14","15","16","17","18","19","20","21","22","23",
