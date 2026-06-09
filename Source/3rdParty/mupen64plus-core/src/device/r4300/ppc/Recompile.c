@@ -127,8 +127,8 @@ int mips_is_jump(MIPS_instr instr){
 int add_jump(int old_jump, int is_j, int is_call){
     if(jump_pos >= MAX_JUMPS) return -1;
     int pos = jump_pos++;
-    jumps[pos].src_pc = src_pc;
-    jumps[pos].dst_instr = dst_ptr;
+    jumps[pos].src_pc = src_pc_val;
+    jumps[pos].dst_instr = dst_ptr_global;
     jumps[pos].old_jump = old_jump;
     jumps[pos].new_jump = 0;
     jumps[pos].type = 0;

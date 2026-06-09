@@ -40,6 +40,7 @@ unsigned int dyna_mem(unsigned int value, unsigned int addr,
 
 void invalidate_func(unsigned int addr);
 void check_invalidate_memory(unsigned int addr);
+void check_interupt(void);
 
 #define Index reg_cop0[0]
 #define Random reg_cop0[1]

@@ -18,22 +18,20 @@ extern struct r4300_core* ppc_dynarec_r4300;
 
 /* Old-style global register arrays */
 extern long long int reg[36];
-extern unsigned long reg_cop0[32];
+extern uint32_t reg_cop0[32];
 extern double *reg_cop1_double[32];
 extern float *reg_cop1_simple[32];
 extern long long int reg_cop1_fgr_64[32];
-extern long FCR0, FCR31;
-extern unsigned long last_addr, interp_addr;
-extern unsigned int next_interupt, CIC_Chip;
+extern uint32_t FCR0, FCR31;
+extern uint32_t last_addr, interp_addr;
+extern uint32_t next_interupt, CIC_Chip;
+extern int llbit;
+extern uint32_t delay_slot;
 
 #define hi (reg[32])
 #define lo (reg[33])
 #define local_rs (reg[34])
 #define local_rt (reg[35])
-
-/* Memory access globals used by the interpreter fallback */
-extern unsigned long address;
-extern long long *rdword;
 
 /* Profiling stubs */
 #define start_section(a)
