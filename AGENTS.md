@@ -173,6 +173,14 @@ The `PPC_SET_SPR` macro itself (`(spr & 0x3FF) << 11`) is **correct** for standa
 
 Swapping to `EMIT_CMPL(0, tmp, 2)` would invert the sense: BLELR would fire when `Count <= next_interrupt` (returning too early, before any interrupt), and fall through when `Count > next_interrupt` (looping forever in backward jumps). **The original ordering is correct; keep `(tmp, 0, 2)`**.
 
+### Bug: Fallthrough address ternary miscomputed for non-NOP delay slots (FIXED)
+
+**Symptom:** The NOT-taken fallthrough path in `branch()` computed the re-entry address as `get_src_pc() + (delaySlot ? 8 : 4)`. After `check_delaySlot()`, `get_src_pc()` returns the delay slot address (`pc+4`). For NOP delay slots this gave `pc+8` (correct), but for non-NOP delay slots it gave `pc+12` (off by 4). This caused the dispatcher to skip the first instruction after the delay slot on re-entry.
+
+**Root cause:** Xenon-ism where `get_src_pc()` had different semantics (returned `src_pc_val` instead of `src_pc_val - 4`). The `delaySlot` ternary was correct for Xenon but wrong for RMG.
+
+**Fix:** Changed `get_src_pc() + (delaySlot ? 8 : 4)` to `get_src_pc() + 4` — which is always correct because `get_src_pc()` already accounts for the consumed delay slot. `MIPS-to-PPC.c:209-210`.
+
 ### Bug: Backward branch BLR safety net (FIXED)
 
 **Symptom:** Backward conditional branches could loop within the block without ever returning to the dispatcher if the Count check somehow fails (e.g., stale `next_interupt` global).
@@ -193,12 +201,15 @@ Swapping to `EMIT_CMPL(0, tmp, 2)` would invert the sense: BLELR would fire when
 | `genJumpPad()` LR restore | `Recompile.c` | 173-174 | FIXED |
 | `lwz` LR on PPC64 | `MIPS-to-PPC.c` | 1095, 1912 | FIXED |
 | **Backward branch BLR** | `MIPS-to-PPC.c` | 219-222 | FIXED |
+| **Fallthrough address ternary** | `MIPS-to-PPC.c` | 209-210 | FIXED |
+| **Stale `next_interupt` after interrupt** | `ppc_dynarec.c` | 246-247 | FIXED |
+| **`decodeNInterpret` sentinel** | `ppc_dynarec.c` | 732 | FIXED |
+| **GEN_BNE/GEN_BNELR BO encoding** | `PowerPC.h` | 565, 1125 | FIXED |
 
 ### Known issues
 
-1. **Stale `next_interupt` global**: After `gen_interrupt()` modifies `r4300->cp0.next_interrupt`, the global `next_interupt` (that r21 points to in recompiled code) is never synced back. The dispatcher at `ppc_dynarec.c:243` also reads the stale global. After the first interrupt fires, Count checks in recompiled blocks use the wrong comparison value.
-2. **Floating-point control** — `fesetround()` / `mtfsf` / `mffs` path needs runtime verification that rounding mode is set correctly for N64 FE_TOWARDZERO emulation.
-3. **No VMX128 in the CPU dynarec** — The recompiler emits only scalar PPC (add, lwz, stw, rlwinm, etc.). LVX/STVX/VOR macros are standard AltiVec and work on both G4/G5 and Xenon.
+1. **Floating-point control** — `fesetround()` / `mtfsf` / `mffs` path needs runtime verification that rounding mode is set correctly for N64 FE_TOWARDZERO emulation.
+2. **No VMX128 in the CPU dynarec** — The recompiler emits only scalar PPC (add, lwz, stw, rlwinm, etc.). LVX/STVX/VOR macros are standard AltiVec and work on both G4/G5 and Xenon.
 
 ---
 

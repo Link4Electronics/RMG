@@ -206,8 +206,8 @@ static int branch(int offset, condition cond, int link, int likely){
     } else {
         if(cond != NONE){
             EMIT_BC(4, 0, 0, bo, bi);
-            EMIT_LIS(3, (get_src_pc()+4)>>16);
-            EMIT_ORI(3, 3, get_src_pc()+4);
+            EMIT_LIS(3, (get_src_pc() + 4)>>16);
+            EMIT_ORI(3, 3, get_src_pc() + 4);
             EMIT_B(3, 0, 0);
         }
         EMIT_LIS(3, (get_src_pc() + (offset<<2))>>16);
