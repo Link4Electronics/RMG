@@ -51,9 +51,14 @@ static inline void gen_interupt(void) {
 
 /* Memory access compatibility functions */
 static inline unsigned long get_physical_addr(unsigned int vaddr) {
-    uint32_t paddr;
-    if (r4300_read_aligned_word(ppc_dynarec_r4300, vaddr, &paddr))
-        return paddr & 0x1FFFFFFF;
+    if ((vaddr & UINT32_C(0xC0000000)) == UINT32_C(0x80000000)) {
+        return vaddr & UINT32_C(0x1FFFFFFF);
+    }
+    if (!ppc_dynarec_r4300) return 0xFFFFFFFF;
+    const struct tlb* tlb = &ppc_dynarec_r4300->cp0.tlb;
+    unsigned int idx = vaddr >> 12;
+    if (tlb->LUT_r[idx])
+        return (tlb->LUT_r[idx] & UINT32_C(0xFFFFF000)) | (vaddr & UINT32_C(0xFFF));
     return 0xFFFFFFFF;
 }
 
