@@ -618,10 +618,10 @@ typedef unsigned int PowerPC_instr;
       ppc |= ((rs) & 0x1F) << 21; \
       ppc |= ((ra) & 0x1F) << 16; \
       ppc |= ((sh) & 0x1F) << 11; \
-      ppc |= ((me) & 0x1F) << 6; \
-      ppc |= (1 << 5); \
-      ppc |= (((sh) >> 5) & 1) << 4; \
-      ppc |= (((me) >> 5) & 1) << 3; \
+      ppc |= (((sh) >> 5) & 1) << 10; \
+      ppc |= ((me) & 0x1F) << 5; \
+      ppc |= (((me) >> 5) & 1) << 4; \
+      ppc |= (1 << 1); \
       ppc |= ((rc) & 1); }
 
 #define GEN_SLD(ppc,ra,rs,sh) \
