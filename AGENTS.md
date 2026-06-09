@@ -343,6 +343,8 @@ However, any struct that is read via a cast AND then accessed with XOR patterns 
 
 9. **`BufferCopy/ColorBufferToRDRAM.cpp`** — Replaced framebuffer fill XOR (`(x+y*VI.width) ^1`)
 
+10. **`sdl_backend.cpp:101`** — Changed hardcoded `SDL_AUDIO_S16LE` to `SDL_AUDIO_S16`. RDRAM stores audio samples in host byte order. On LE hosts `SDL_AUDIO_S16` == `SDL_AUDIO_S16LE` (correct); on BE hosts it becomes `SDL_AUDIO_S16BE` (correct). Previously hardcoded LE caused each 16-bit sample to have reversed bytes on BE → static noise.
+
 ### Current status (after GLideN64 endian accessor fixes)
 
 **SM64 boots** (ucode recognized) but **black screen + static audio** status unchanged. All LE-specific XOR byte-swap patterns in critical SM64 rendering paths (gSP, gDP, GraphicsDrawer, RSP_LoadMatrix, BufferCopy) have been wrapped with endian-aware macros. The next compile/test cycle will reveal whether the black screen was caused by these XOR patterns or if additional issues remain.

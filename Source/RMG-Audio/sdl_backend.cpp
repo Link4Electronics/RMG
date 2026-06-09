@@ -98,7 +98,7 @@ static void sdl_init_audio_device(struct sdl_backend* sdl_backend)
 
     memset(&spec, 0, sizeof(spec));
     spec.freq     = sdl_backend->frequency;
-    spec.format   = SDL_AUDIO_S16LE;
+    spec.format   = SDL_AUDIO_S16;
     spec.channels = 2;
 
     /* Open the audio device */
