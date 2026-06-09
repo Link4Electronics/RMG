@@ -399,7 +399,8 @@ Pass `-DPPC_DYNAREC=ON` to cmake. The `3rdParty/CMakeLists.txt` propagates:
 | `mupen64plus-core` | **OK** | **OK** | Pure/cached interpreter working; ucode crash fixed (RDRAMSize fix); PPC_DYNAREC enabled via cmake option but on hold |
 | `mupen64plus-rsp-hle` | **OK** | **OK** | Endian-aware via `M64P_BIG_ENDIAN` memory macros (XOR-based accessors) |
 | `mupen64plus-rsp-cxd4` | **OK** (scalar) | **OK** | SSE2 path auto-disabled; scalar fallback performs all ops |
-| `mupen64plus-video-GLideN64` | **OK** | **BROKEN** | Boots SM64 but black screen. LE-specific XOR byte-swap patterns corrupt vertex/light/matrix/framebuffer data on BE. uc_code CRC + UnswapCopyWrap + TMEM palette read + gDPLoadBlock32 + DWordInterleaveWrap fixes applied. Audio works separately. | |
+| `mupen64plus-video-GLideN64` | **OK** | **DEFERRED** | SM64 boots but black screen; deferred in favor of rice (OpenGL 2.0). LE-specific XOR byte-swap pattern fixes applied but untested. | |
+| `mupen64plus-video-rice` | **OK** | **PENDING** | Listed in RMG after fixing undefined `DXFrameBufferManager` vtable symbol (inline stubs in `FrameBuffer.h`). Rendering TBD. |
 | `mupen64plus-video-parallel` | **OK** | **N/A** (no Vulkan on G5) | SSE2 guarded with `#ifdef __SSE2__`, has scalar fallback |
 | `mupen64plus-input-raphnetraw` | **OK** | **OK** | No arch-specific code |
 | `RMG-Audio` | **OK** | **OK** | Works after `SDL_AUDIO_S16LE`→`SDL_AUDIO_S16` (detects host endian automatically) |
@@ -415,20 +416,21 @@ Changed `$(warning ...)` to `$(info ...)` with "supported by RMG" for PPC blocks
 
 ## Current focus
 
-**Primary: Pure interpreter + GLideN64 video plugin** — get SM64 to render correctly on PPC64 BE.
+**Primary: Pure interpreter + mupen64plus-video-rice** — get SM64 to render correctly on PPC64 BE via the rice (OpenGL 2.0) plugin.
 
-Status: SM64 boots (ucode recognized) but black screen remains. **Audio now works** (SDL_AUDIO_S16LE→S16). All LE-specific XOR byte-swap patterns in critical rendering paths (gSP, gDP, GraphicsDrawer, RSP_LoadMatrix, BufferCopy) wrapped with endian-aware macros. Three additional endian bugs fixed this session:
-1. **CRITICAL: TMEM palette reads** used u64 indexing — read wrong bytes on BE → transparent black textures
-2. **gDPLoadBlock32** `E_XOR(t)` disabled TMEM interleave on BE
-3. **DWordInterleaveWrap** called on BE after NOP UnswapCopyWrap, corrupting odd TMEM rows
+**Secondary: PPC64 dynarec** — deferred.
+**GLideN64** — deferred in favor of rice (GL 2.0 compatibility on G5).
 
-Next compile/test cycle will reveal if these fix the black screen.
+### Rice plugin status
 
-**Secondary: PPC64 dynarec** — on hold until interpreter produces correct video output.
+| Issue | Fix | Status |
+|-------|-----|--------|
+| Not listed in RMG | `extern "C" EXPORT` → `EXPORT` (removed redundant `extern "C"`); made `DXFrameBufferManager`/`OGLFrameBufferManager` virtual overrides inline in `FrameBuffer.h` (were undefined symbols on PPC64 `ld`) | **FIXED** |
+| Endian-correctness (BE) | TBD — may need similar endian-aware accessor macros as GLideN64 if rendering is corrupted | **UNKNOWN** |
 
-Known fixes needed:
-1. ~~Systematic endian-aware accessor macros in GLideN64~~ (DONE)
-2. ~~Verify RMG-Audio endian handling~~ (DONE — works)
-3. ~~Fix TMEM palette reads~~ (DONE — CRITICAL for black screen)
-4. After GLideN64 renders correctly, verify audio output
-5. Once interpreter is fully functional, return to PPC dynarec testing
+### Known fixes needed
+1. ~~Wire rice into CMake build system~~ (DONE)
+2. ~~Fix DXFrameBufferManager undefined vtable symbol~~ (DONE)
+3. Verify rice renders SM64 correctly on PPC64 BE (next compile/test cycle)
+4. If black screen/corruption, apply BE endian fixes analogous to GLideN64 ones (RDRAM XOR patterns, TMEM access, etc.)
+5. Once video output works, optionally return to PPC dynarec testing
