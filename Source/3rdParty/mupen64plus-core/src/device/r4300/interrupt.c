@@ -465,7 +465,7 @@ void nmi_int_handler(void* opaque)
         cp0_regs[CP0_ERROREPC_REG]-=4;
     }
     r4300->delay_slot = 0;
-#ifndef NEW_DYNAREC
+#if !defined(NEW_DYNAREC) && !defined(PPC_DYNAREC)
     r4300->recomp.dyna_interp = 0;
 #endif
     // set next instruction address to reset vector
@@ -480,7 +480,7 @@ void reset_hard_handler(void* opaque)
     struct device* dev = (struct device*)opaque;
     struct r4300_core* r4300 = &dev->r4300;
 
-#ifndef NEW_DYNAREC
+#if !defined(NEW_DYNAREC) && !defined(PPC_DYNAREC)
 #if defined(__x86_64__)
     long long save_rsp = r4300->recomp.save_rsp;
     long long save_rip = r4300->recomp.save_rip;
@@ -505,10 +505,10 @@ void reset_hard_handler(void* opaque)
     *r4300_pc_struct(r4300) = &r4300->interp_PC;
     if (r4300->emumode >= 2)
     {
-#ifdef NEW_DYNAREC
+#if defined(NEW_DYNAREC)
         new_dynarec_cleanup();
         new_dynarec_init();
-#else
+#elif !defined(PPC_DYNAREC)
 #if defined(__x86_64__)
         r4300->recomp.save_rsp = save_rsp;
         r4300->recomp.save_rip = save_rip;
