@@ -244,6 +244,8 @@ void dynarec(unsigned int address){
                 if (dbg_iter <= 50)
                     fprintf(stderr, "[PPC_DYN] gen_interupt next_int=%u Count=%u\n", next_interupt, Count);
                 gen_interupt();
+                if (ppc_dynarec_r4300)
+                    next_interupt = ppc_dynarec_r4300->cp0.next_interrupt;
                 address = interp_addr;
             }
         }
@@ -730,7 +732,7 @@ unsigned int decodeNInterpret(MIPS_instr mips, unsigned int pc,
     delay_slot = 0;
     noCheckInterrupt = (interp_addr != pc + 4) ? 1 : 0;
     fprintf(stderr, "[decodeNInterpret] returning addr=0x%08X\n", interp_addr);
-    return (interp_addr != pc + 4) ? interp_addr : 6;
+    return (interp_addr != pc + 4) ? interp_addr : 0;
 }
 #undef EXEC_DELAY
 
