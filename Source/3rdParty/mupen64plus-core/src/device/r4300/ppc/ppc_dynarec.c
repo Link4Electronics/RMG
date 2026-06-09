@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <math.h>
 
 #include "device/r4300/r4300_core.h"
 #include "device/r4300/cp0.h"
@@ -252,14 +253,34 @@ void dynarec(unsigned int address){
     fprintf(stderr, "[PPC_DYN] dynarec() exiting, final address=0x%08X\n", address);
 }
 
+/* Read a MIPS instruction word from N64 memory at virtual address */
+static MIPS_instr read_mips_mem(uint32_t vaddr) {
+    uint32_t wval = 0;
+    read_rmg_word(vaddr, &wval);
+    return wval;
+}
+
+/* Sign-extend a 16-bit immediate */
+static inline int32_t sign_ext16(uint32_t x) {
+    return (x & 0x8000) ? (int32_t)(x | 0xFFFF0000) : (int32_t)x;
+}
+
 unsigned int decodeNInterpret(MIPS_instr mips, unsigned int pc,
                               int isDelaySlot){
-    fprintf(stderr, "[decodeNInterpret] op=0x%02X mips=0x%08X pc=0x%08X ds=%d\n", MIPS_GET_OPCODE(mips), mips, pc, isDelaySlot);
+    fprintf(stderr, "[decodeNInterpret] op=0x%02X mips=0x%08X pc=0x%08X ds=%d\n",
+            MIPS_GET_OPCODE(mips), mips, pc, isDelaySlot);
     unsigned int op = MIPS_GET_OPCODE(mips);
     delay_slot = isDelaySlot;
     interp_addr = pc;
 
+    /* Helper: execute delay slot, returns 1 if slot was executed */
+#define EXEC_DELAY() do { \
+    MIPS_instr _d = read_mips_mem(pc + 4); \
+    decodeNInterpret(_d, pc + 4, 1); \
+} while(0)
+
     switch(op) {
+    /* ---------- COP0 ---------- */
     case MIPS_OPCODE_COP0: {
         unsigned int rs = MIPS_GET_RS(mips);
         unsigned int rt = MIPS_GET_RT(mips);
@@ -291,21 +312,424 @@ unsigned int decodeNInterpret(MIPS_instr mips, unsigned int pc,
                 break;
             case MIPS_FUNC_TLBP:
                 break;
-            case MIPS_FUNC_ERET:
+            case MIPS_FUNC_ERET: {
+                /* ERET: restore SR, jump to EPC */
+                uint32_t sr = reg_cop0[12];
+                if (sr & 0x04) { /* SR(ERL) set → ErrorEPC */
+                    reg_cop0[12] = sr & ~0x04;
+                    interp_addr = reg_cop0[30];
+                } else {
+                    reg_cop0[12] = sr & ~0x02;
+                    interp_addr = reg_cop0[14];
+                }
+                break;
+            }
+            }
+        }
+        interp_addr = (interp_addr == pc) ? pc + 4 : interp_addr;
+        break;
+    }
+
+    /* ---------- CACHE (no-op) ---------- */
+    case MIPS_OPCODE_CACHE:
+        interp_addr = pc + 4;
+        break;
+
+    /* ---------- J / JAL ---------- */
+    case MIPS_OPCODE_J:
+    case MIPS_OPCODE_JAL: {
+        EXEC_DELAY();
+        unsigned int target = MIPS_GET_TARGET(mips);
+        if (op == MIPS_OPCODE_JAL)
+            reg[31] = (long long)(int)(pc + 8);
+        interp_addr = (target << 2) | (pc & 0xF0000000);
+        break;
+    }
+
+    /* ---------- Branch likely helpers ---------- */
+#define BRANCH_LIKELY(_take) do { \
+    if (!(_take) && ((op & 2) == 0)) { /* likely variant = op bit 1 */ \
+        interp_addr = pc + 8; \
+        break; \
+    } \
+    EXEC_DELAY(); \
+    if (_take) { \
+        int32_t _off = sign_ext16(MIPS_GET_IMMED(mips)); \
+        interp_addr = pc + 4 + (_off << 2); \
+    } else { \
+        interp_addr = pc + 8; \
+    } \
+} while(0)
+
+    case MIPS_OPCODE_BEQ:
+    case MIPS_OPCODE_BEQL: {
+        int take = (reg[MIPS_GET_RS(mips)] == reg[MIPS_GET_RT(mips)]);
+        BRANCH_LIKELY(take);
+        break;
+    }
+
+    case MIPS_OPCODE_BNE:
+    case MIPS_OPCODE_BNEL: {
+        int take = (reg[MIPS_GET_RS(mips)] != reg[MIPS_GET_RT(mips)]);
+        BRANCH_LIKELY(take);
+        break;
+    }
+
+    case MIPS_OPCODE_BLEZ:
+    case MIPS_OPCODE_BLEZL: {
+        int take = (reg[MIPS_GET_RS(mips)] <= 0);
+        BRANCH_LIKELY(take);
+        break;
+    }
+
+    case MIPS_OPCODE_BGTZ:
+    case MIPS_OPCODE_BGTZL: {
+        int take = (reg[MIPS_GET_RS(mips)] > 0);
+        BRANCH_LIKELY(take);
+        break;
+    }
+#undef BRANCH_LIKELY
+
+    /* ---------- REGIMM (B opcode) ---------- */
+    case MIPS_OPCODE_B: {
+        unsigned int rt = MIPS_GET_RT(mips);
+        unsigned int ra = MIPS_GET_RA(mips);
+        int likely   = (rt >> 1) & 1;
+        int link     = (rt >> 4) & 1;
+        int ge       = rt & 1;
+        int take = 0;
+
+        if (ge)    take = (reg[ra] >= 0);
+        else       take = (reg[ra] <  0);
+
+        if (!take && likely) {
+            interp_addr = pc + 8;
+        } else {
+            EXEC_DELAY();
+            if (link) reg[31] = (long long)(int)(pc + 8);
+            if (take) {
+                int32_t off = sign_ext16(MIPS_GET_IMMED(mips));
+                interp_addr = pc + 4 + (off << 2);
+            } else {
+                interp_addr = pc + 8;
+            }
+        }
+        break;
+    }
+
+    /* ---------- SPECIAL (opcode 0x00 / R) ---------- */
+    case MIPS_OPCODE_R: {
+        unsigned int func = MIPS_GET_FUNC(mips);
+        unsigned int rs = MIPS_GET_RS(mips);
+        unsigned int rt = MIPS_GET_RT(mips);
+        unsigned int rd = MIPS_GET_RD(mips);
+
+        switch (func) {
+        /* --- JR / JALR --- */
+        case MIPS_FUNC_JR:
+        case MIPS_FUNC_JALR: {
+            EXEC_DELAY();
+            if (func == MIPS_FUNC_JALR)
+                reg[rd] = (long long)(int)(pc + 8);
+            interp_addr = (unsigned int)reg[rs];
+            break;
+        }
+
+        /* --- HI / LO access --- */
+        case MIPS_FUNC_MFHI:
+            reg[rd] = reg[32];
+            interp_addr = pc + 4;
+            break;
+        case MIPS_FUNC_MTHI:
+            reg[32] = reg[rs];
+            interp_addr = pc + 4;
+            break;
+        case MIPS_FUNC_MFLO:
+            reg[rd] = reg[33];
+            interp_addr = pc + 4;
+            break;
+        case MIPS_FUNC_MTLO:
+            reg[33] = reg[rs];
+            interp_addr = pc + 4;
+            break;
+
+        /* --- 64-bit multiply / divide --- */
+        case MIPS_FUNC_DMULT: {
+            uint64_t a = (uint64_t)reg[rs];
+            uint64_t b = (uint64_t)reg[rt];
+#ifdef __SIZEOF_INT128__
+            unsigned __int128 r = (unsigned __int128)a * b;
+            reg[32] = (int64_t)(r >> 64);
+            reg[33] = (int64_t)(r & 0xFFFFFFFFFFFFFFFFULL);
+#else
+            /* Fallback: split into halves */
+            uint64_t al = a & 0xFFFFFFFF, ah = a >> 32;
+            uint64_t bl = b & 0xFFFFFFFF, bh = b >> 32;
+            uint64_t ll = al * bl, lh = al * bh, hl = ah * bl, hh = ah * bh;
+            uint64_t m = lh + hl;
+            reg[33] = (int64_t)(ll + (m << 32));
+            reg[32] = (int64_t)(hh + (lh >> 32) + (hl >> 32) + (m < lh || m < hl));
+#endif
+            interp_addr = pc + 4;
+            break;
+        }
+        case MIPS_FUNC_DMULTU: {
+            uint64_t a = (uint64_t)reg[rs];
+            uint64_t b = (uint64_t)reg[rt];
+#ifdef __SIZEOF_INT128__
+            unsigned __int128 r = (unsigned __int128)a * b;
+            reg[32] = (int64_t)(r >> 64);
+            reg[33] = (int64_t)(r & 0xFFFFFFFFFFFFFFFFULL);
+#else
+            uint64_t al = a & 0xFFFFFFFF, ah = a >> 32;
+            uint64_t bl = b & 0xFFFFFFFF, bh = b >> 32;
+            uint64_t ll = al * bl, lh = al * bh, hl = ah * bl, hh = ah * bh;
+            uint64_t m = lh + hl;
+            reg[33] = (int64_t)(ll + (m << 32));
+            reg[32] = (int64_t)(hh + (lh >> 32) + (hl >> 32) + (m < lh || m < hl));
+#endif
+            interp_addr = pc + 4;
+            break;
+        }
+        case MIPS_FUNC_DDIV: {
+            int64_t a = reg[rs], b = reg[rt];
+            if (b == 0) { /* undefined */
+                interp_addr = pc + 4; break;
+            } else if (a == INT64_MIN && b == -1) {
+                reg[33] = INT64_MIN; reg[32] = 0;
+            } else {
+                reg[33] = a / b; reg[32] = a % b;
+            }
+            interp_addr = pc + 4;
+            break;
+        }
+        case MIPS_FUNC_DDIVU: {
+            uint64_t a = (uint64_t)reg[rs], b = (uint64_t)reg[rt];
+            if (b == 0) { /* undefined */
+                interp_addr = pc + 4; break;
+            } else {
+                reg[33] = (int64_t)(a / b); reg[32] = (int64_t)(a % b);
+            }
+            interp_addr = pc + 4;
+            break;
+        }
+
+        /* --- SYSCALL / BREAK --- */
+        case MIPS_FUNC_SYSCALL: {
+            if (ppc_dynarec_r4300) {
+                Cause = (8 << 2);
+                EPC = pc;
+                if (isDelaySlot) { EPC = pc - 4; Cause |= 0x80000000; }
+                exception_general(ppc_dynarec_r4300);
+            }
+            return interp_addr;
+        }
+        case MIPS_FUNC_BREAK: {
+            if (ppc_dynarec_r4300) {
+                Cause = (9 << 2);
+                EPC = pc;
+                if (isDelaySlot) { EPC = pc - 4; Cause |= 0x80000000; }
+                exception_general(ppc_dynarec_r4300);
+            }
+            return interp_addr;
+        }
+
+        /* --- SYNC (no-op) --- */
+        case MIPS_FUNC_SYNC:
+            interp_addr = pc + 4;
+            break;
+
+        default:
+            interp_addr = pc + 4;
+            break;
+        }
+        break;
+    }
+
+    /* ---------- COP1 ---------- */
+    case MIPS_OPCODE_COP1: {
+        unsigned int fmt = MIPS_GET_RS(mips);
+        unsigned int rt  = MIPS_GET_RT(mips);
+        unsigned int rd  = MIPS_GET_RD(mips);
+
+        /* COP1 branch (BC1F / BC1T) */
+        if (fmt == MIPS_FRMT_BC) {
+            int likely = (mips >> 17) & 1;
+            int tf     = (mips >> 16) & 1;   /* 0=BC1F, 1=BC1T */
+            unsigned int cc = MIPS_GET_CC(mips);
+            int bit = 23 - cc;                /* CC0=bit23, CC1=bit24, ... */
+            int cond = (FCR31 >> bit) & 1;
+            int take = (tf == 1) ? cond : !cond;
+
+            if (!take && likely) {
+                interp_addr = pc + 8;
+            } else {
+                EXEC_DELAY();
+                if (take) {
+                    int32_t off = sign_ext16(MIPS_GET_IMMED(mips));
+                    interp_addr = pc + 4 + (off << 2);
+                } else {
+                    interp_addr = pc + 8;
+                }
+            }
+            break;
+        }
+
+        /* COP1 register transfer */
+        if (fmt <= MIPS_FRMT_CTC) {
+            switch (fmt) {
+            case MIPS_FRMT_MFC:
+                reg[rt] = (long long)(int)*reg_cop1_simple[rd];
+                break;
+            case MIPS_FRMT_DMFC:
+                reg[rt] = (long long)reg_cop1_fgr_64[rd];
+                break;
+            case MIPS_FRMT_CFC:
+                reg[rt] = (long long)(int)(rd == 0 ? 0x0F000000 : FCR31);
+                break;
+            case MIPS_FRMT_MTC:
+                *reg_cop1_simple[rd] = (float)(int)reg[rt];
+                reg_cop1_fgr_64[rd] = (int64_t)(int)*reg_cop1_simple[rd];
+                break;
+            case MIPS_FRMT_DMTC:
+                *(uint64_t*)reg_cop1_double[rd] = (uint64_t)reg[rt];
+                reg_cop1_fgr_64[rd] = reg[rt];
+                break;
+            case MIPS_FRMT_CTC:
+                if (rd == 31) FCR31 = (uint32_t)reg[rt];
+                break;
+            }
+            interp_addr = pc + 4;
+            break;
+        }
+
+        /* FPU arithmetic (S/D/W/L) — rare in interpreted path,
+           included for completeness */
+        {
+            unsigned int fs = MIPS_GET_RD(mips);
+            unsigned int ft = MIPS_GET_RT(mips);
+            unsigned int fd = MIPS_GET_SA(mips);
+            unsigned int subfunc = MIPS_GET_FUNC(mips);
+
+            switch (fmt) {
+            case 16: { /* S (single) */
+                float a = *reg_cop1_simple[fs];
+                float b = *reg_cop1_simple[ft];
+                float r = 0.0f;
+                switch (subfunc) {
+                case MIPS_FUNC_ADD_:  r = a + b; break;
+                case MIPS_FUNC_SUB_:  r = a - b; break;
+                case MIPS_FUNC_MUL_:  r = a * b; break;
+                case MIPS_FUNC_DIV_:  r = a / b; break;
+                case MIPS_FUNC_ABS_:  r = fabsf(a); break;
+                case MIPS_FUNC_NEG_:  r = -a; break;
+                case MIPS_FUNC_MOV_:  r = a; break;
+                case MIPS_FUNC_SQRT_: r = sqrtf(a); break;
+                case MIPS_FUNC_ROUND_W_: r = (float)roundf(a); break;
+                case MIPS_FUNC_TRUNC_W_: r = (float)truncf(a); break;
+                case MIPS_FUNC_CEIL_W_:  r = (float)ceilf(a); break;
+                case MIPS_FUNC_FLOOR_W_: r = (float)floorf(a); break;
+                case MIPS_FUNC_CVT_D_:   *reg_cop1_double[fd] = (double)a; break;
+                case MIPS_FUNC_CVT_W_:   r = (float)(int)a; break;
+                case MIPS_FUNC_CVT_L_:   reg_cop1_fgr_64[fd] = (int64_t)a; break;
+                default: interp_addr = pc + 4; break;
+                }
+                if (subfunc != MIPS_FUNC_CVT_D_) {
+                    *reg_cop1_simple[fd] = r;
+                    reg_cop1_fgr_64[fd] = (int64_t)(int)r;
+                }
+                interp_addr = pc + 4;
+                break;
+            }
+            case 17: { /* D (double) */
+                double a = *reg_cop1_double[fs];
+                double b = *reg_cop1_double[ft];
+                double r = 0.0;
+                switch (subfunc) {
+                case MIPS_FUNC_ADD_:     r = a + b; break;
+                case MIPS_FUNC_SUB_:     r = a - b; break;
+                case MIPS_FUNC_MUL_:     r = a * b; break;
+                case MIPS_FUNC_DIV_:     r = a / b; break;
+                case MIPS_FUNC_ABS_:     r = fabs(a); break;
+                case MIPS_FUNC_NEG_:     r = -a; break;
+                case MIPS_FUNC_MOV_:     r = a; break;
+                case MIPS_FUNC_SQRT_:    r = sqrt(a); break;
+                case MIPS_FUNC_ROUND_W_: r = (double)(int)round(a); break;
+                case MIPS_FUNC_TRUNC_W_: r = (double)(int)trunc(a); break;
+                case MIPS_FUNC_CEIL_W_:  r = (double)(int)ceil(a); break;
+                case MIPS_FUNC_FLOOR_W_: r = (double)(int)floor(a); break;
+                case MIPS_FUNC_CVT_S_:   *reg_cop1_simple[fd] = (float)a; break;
+                case MIPS_FUNC_CVT_W_:   r = (double)(int)a; break;
+                case MIPS_FUNC_CVT_L_:   reg_cop1_fgr_64[fd] = (int64_t)a; break;
+                case MIPS_FUNC_ROUND_L_: reg_cop1_fgr_64[fd] = (int64_t)round(a); break;
+                case MIPS_FUNC_TRUNC_L_: reg_cop1_fgr_64[fd] = (int64_t)trunc(a); break;
+                case MIPS_FUNC_CEIL_L_:  reg_cop1_fgr_64[fd] = (int64_t)ceil(a); break;
+                case MIPS_FUNC_FLOOR_L_: reg_cop1_fgr_64[fd] = (int64_t)floor(a); break;
+                default: interp_addr = pc + 4; break;
+                }
+                if (subfunc != MIPS_FUNC_CVT_S_) {
+                    *reg_cop1_double[fd] = r;
+                    reg_cop1_fgr_64[fd] = *(int64_t*)&r;
+                }
+                interp_addr = pc + 4;
+                break;
+            }
+            case 20: { /* W (word) — convert to/from word */
+                switch (subfunc) {
+                case MIPS_FUNC_CVT_S_: {
+                    int32_t w = (int32_t)*reg_cop1_simple[fs];
+                    *reg_cop1_simple[fd] = (float)w;
+                    reg_cop1_fgr_64[fd] = (int64_t)w;
+                    break;
+                }
+                case MIPS_FUNC_CVT_D_: {
+                    int32_t w = (int32_t)*reg_cop1_simple[fs];
+                    *reg_cop1_double[fd] = (double)w;
+                    reg_cop1_fgr_64[fd] = (int64_t)w;
+                    break;
+                }
+                }
+                interp_addr = pc + 4;
+                break;
+            }
+            case 21: { /* L (long) — convert to/from long */
+                switch (subfunc) {
+                case MIPS_FUNC_CVT_S_: {
+                    int64_t w = reg_cop1_fgr_64[fs];
+                    *reg_cop1_simple[fd] = (float)w;
+                    reg_cop1_fgr_64[fd] = w;
+                    break;
+                }
+                case MIPS_FUNC_CVT_D_: {
+                    int64_t w = reg_cop1_fgr_64[fs];
+                    *reg_cop1_double[fd] = (double)w;
+                    reg_cop1_fgr_64[fd] = w;
+                    break;
+                }
+                }
+                interp_addr = pc + 4;
+                break;
+            }
+            default:
+                interp_addr = pc + 4;
                 break;
             }
         }
         break;
     }
-    case MIPS_OPCODE_CACHE:
-        break;
+
+    /* ---------- Default: just advance PC ---------- */
     default:
+        interp_addr = pc + 4;
         break;
     }
+
     delay_slot = 0;
-    noCheckInterrupt = 0;
-    return 6;
+    noCheckInterrupt = (interp_addr != pc + 4) ? 1 : 0;
+    fprintf(stderr, "[decodeNInterpret] returning addr=0x%08X\n", interp_addr);
+    return (interp_addr != pc + 4) ? interp_addr : 6;
 }
+#undef EXEC_DELAY
 
 int dyna_update_count(unsigned int pc){
     Count += (pc - last_addr)/2;
