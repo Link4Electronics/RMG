@@ -13,6 +13,12 @@
 
 #include "ppc_dynarec_compat.h"
 
+/* libgcc builtins used as jump targets from recompiled code */
+extern long long __fixdfdi(double);
+extern long long __fixsfdi(float);
+extern double __floatdidf(long long);
+extern float __floatdisf(long long);
+
 static int FP_need_check;
 static int delaySlotNext, isDelaySlot;
 
@@ -134,7 +140,8 @@ int convert(void){
     return result;
 }
 
-static int NI(void){
+static int NI(MIPS_instr mips){
+    (void)mips;
     return CONVERT_ERROR;
 }
 
@@ -1326,7 +1333,7 @@ static int SQRT_FP(MIPS_instr mips, int dbl){
     genCheckFP();
     int fr=mapFPR( MIPS_GET_FS(mips), dbl );
     EMIT_FMR(1,fr);
-    EMIT_B(add_jump((dbl ? (int)&sqrt : (int)&sqrtf), 1, 1), 0, 1);
+    EMIT_B(add_jump((dbl ? (uintptr_t)&sqrt : (uintptr_t)&sqrtf), 1, 1), 0, 1);
     fr=mapFPRNew( MIPS_GET_FD(mips), dbl );
     EMIT_FMR(fr,1);
     EMIT_LWZ(0, DYNAOFF_LR, 1);
@@ -1377,8 +1384,8 @@ static int ROUND_L_FP(MIPS_instr mips, int dbl){
     int fs = mapFPR( MIPS_GET_FS(mips), dbl );
     invalidateFPR( MIPS_GET_FS(mips) );
     EMIT_FMR(1,fs);
-    EMIT_B(add_jump((dbl ? (int)&round : (int)&roundf), 1, 1), 0, 1);
-    EMIT_B(add_jump((dbl ? (int)&__fixdfdi : (int)&__fixsfdi), 1, 1), 0, 1);
+    EMIT_B(add_jump((dbl ? (uintptr_t)&round : (uintptr_t)&roundf), 1, 1), 0, 1);
+    EMIT_B(add_jump((dbl ? (uintptr_t)&__fixdfdi : (uintptr_t)&__fixsfdi), 1, 1), 0, 1);
     int addr = 5;
     EMIT_LWZ(addr, fd*4, DYNAREG_FPR_64);
     EMIT_LWZ(0, DYNAOFF_LR, 1);
@@ -1394,7 +1401,7 @@ static int TRUNC_L_FP(MIPS_instr mips, int dbl){
     int fs = mapFPR( MIPS_GET_FS(mips), dbl );
     invalidateFPR( MIPS_GET_FS(mips) );
     EMIT_FMR(1,fs);
-    EMIT_B(add_jump((dbl ? (int)&__fixdfdi : (int)&__fixsfdi), 1, 1), 0, 1);
+    EMIT_B(add_jump((dbl ? (uintptr_t)&__fixdfdi : (uintptr_t)&__fixsfdi), 1, 1), 0, 1);
     int addr = 5;
     EMIT_LWZ(addr, fd*4, DYNAREG_FPR_64);
     EMIT_LWZ(0, DYNAOFF_LR, 1);
@@ -1410,8 +1417,8 @@ static int CEIL_L_FP(MIPS_instr mips, int dbl){
     int fs = mapFPR( MIPS_GET_FS(mips), dbl );
     invalidateFPR( MIPS_GET_FS(mips) );
     EMIT_FMR(1,fs);
-    EMIT_B(add_jump((dbl ? (int)&ceil : (int)&ceilf), 1, 1), 0, 1);
-    EMIT_B(add_jump((dbl ? (int)&__fixdfdi : (int)&__fixsfdi), 1, 1), 0, 1);
+    EMIT_B(add_jump((dbl ? (uintptr_t)&ceil : (uintptr_t)&ceilf), 1, 1), 0, 1);
+    EMIT_B(add_jump((dbl ? (uintptr_t)&__fixdfdi : (uintptr_t)&__fixsfdi), 1, 1), 0, 1);
     int addr = 5;
     EMIT_LWZ(addr, fd*4, DYNAREG_FPR_64);
     EMIT_LWZ(0, DYNAOFF_LR, 1);
@@ -1427,8 +1434,8 @@ static int FLOOR_L_FP(MIPS_instr mips, int dbl){
     int fs = mapFPR( MIPS_GET_FS(mips), dbl );
     invalidateFPR( MIPS_GET_FS(mips) );
     EMIT_FMR(1,fs);
-    EMIT_B(add_jump((dbl ? (int)&floor : (int)&floorf), 1, 1), 0, 1);
-    EMIT_B(add_jump((dbl ? (int)&__fixdfdi : (int)&__fixsfdi), 1, 1), 0, 1);
+    EMIT_B(add_jump((dbl ? (uintptr_t)&floor : (uintptr_t)&floorf), 1, 1), 0, 1);
+    EMIT_B(add_jump((dbl ? (uintptr_t)&__fixdfdi : (uintptr_t)&__fixsfdi), 1, 1), 0, 1);
     int addr = 5;
     EMIT_LWZ(addr, fd*4, DYNAREG_FPR_64);
     EMIT_LWZ(0, DYNAOFF_LR, 1);
@@ -1533,7 +1540,7 @@ static int CVT_L_FP(MIPS_instr mips, int dbl){
     int fs = mapFPR( MIPS_GET_FS(mips), dbl );
     invalidateFPR( MIPS_GET_FS(mips) );
     EMIT_FMR(1,fs);
-    EMIT_B(add_jump((dbl ? (int)&__fixdfdi : (int)&__fixsfdi), 1, 1), 0, 1);
+    EMIT_B(add_jump((dbl ? (uintptr_t)&__fixdfdi : (uintptr_t)&__fixsfdi), 1, 1), 0, 1);
     int addr = 5;
     EMIT_LWZ(addr, fd*4, DYNAREG_FPR_64);
     EMIT_LWZ(0, DYNAOFF_LR, 1);
@@ -1797,7 +1804,7 @@ static int CVT_FP_L(MIPS_instr mips, int dbl){
     EMIT_LWZ(lo, 4, lo);
     EMIT_OR(3,hi,hi);
     EMIT_OR(4,lo,lo);
-    EMIT_B(add_jump((dbl ? (int)&__floatdidf : (int)&__floatdisf), 1, 1), 0, 1);
+    EMIT_B(add_jump((dbl ? (uintptr_t)&__floatdidf : (uintptr_t)&__floatdisf), 1, 1), 0, 1);
     EMIT_FMR(fd,1);
     EMIT_LWZ(0, DYNAOFF_LR, 1);
     EMIT_MTLR(0);

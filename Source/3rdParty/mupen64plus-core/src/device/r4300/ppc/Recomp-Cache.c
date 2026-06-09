@@ -220,8 +220,8 @@ void RecompCache_Link(PowerPC_func* src_func, PowerPC_instr* src_instr,
     dst_func->links_in = fln;
     insert_func(&src_func->links_out, dst_func);
 
-    GEN_LIS(*(src_instr-10), DYNAREG_FUNC, (unsigned int)dst_func>>16);
-    GEN_ORI(*(src_instr-9), DYNAREG_FUNC, DYNAREG_FUNC, (unsigned int)dst_func);
+    GEN_LIS(*(src_instr-10), DYNAREG_FUNC, ((unsigned long)dst_func >> 16) & 0xFFFF);
+    GEN_ORI(*(src_instr-9), DYNAREG_FUNC, DYNAREG_FUNC, (unsigned long)dst_func & 0xFFFF);
     GEN_B(*src_instr, (PowerPC_instr*)dst_instr-src_instr, 0, 0);
     DCFlushRange(src_instr-10, 11*sizeof(PowerPC_instr));
     ICInvalidateRange(src_instr-10, 11*sizeof(PowerPC_instr));
