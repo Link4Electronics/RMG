@@ -163,6 +163,7 @@ void dynarec(unsigned int address){
             dst_block->start_address = address & ~0xFFF;
             dst_block->end_address   = (address & ~0xFFF) + 0x1000;
             init_block(dst_block);
+            blocks[address>>12] = dst_block;
         } else if(invalid_code[address>>12]){
             invalidate_block(dst_block);
         }
@@ -294,6 +295,7 @@ void check_interupt(void){
 
 void invalidate_func(unsigned int addr){
     PowerPC_block* block = blocks_get(addr>>12);
+    if(!block) return;
     for(;;) {
         PowerPC_func* func = find_func(&block->funcs, addr);
         if(func)

@@ -135,7 +135,7 @@ static void free_func(PowerPC_func* func, unsigned int addr){
     free(func->code);
     MetaCache_Free(func->code_addr);
     PowerPC_block* block = blocks_get(addr>>12);
-    remove_func(&block->funcs, func);
+    if(block) remove_func(&block->funcs, func);
     unlink_func(func);
     free(func);
 }
