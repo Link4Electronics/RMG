@@ -94,7 +94,7 @@ ifneq ("$(filter ppc macppc socppc powerpc,$(HOST_CPU))","")
   BIG_ENDIAN := 1
   PIC ?= 1
   NO_ASM := 1
-  $(warning Architecture "$(HOST_CPU)" not officially supported.')
+  $(info Architecture "$(HOST_CPU)" not officially supported, but supported by RMG)
 endif
 ifneq ("$(filter ppc64 powerpc64,$(HOST_CPU))","")
   CPU := PPC
@@ -102,7 +102,7 @@ ifneq ("$(filter ppc64 powerpc64,$(HOST_CPU))","")
   BIG_ENDIAN := 1
   PIC ?= 1
   NO_ASM := 1
-  $(warning Architecture "$(HOST_CPU)" not officially supported.')
+  $(info Architecture "$(HOST_CPU)" not officially supported, but supported by RMG)
 endif
 ifneq ("$(filter ppc64le powerpc64le,$(HOST_CPU))","")
   CPU := PPC
@@ -110,7 +110,7 @@ ifneq ("$(filter ppc64le powerpc64le,$(HOST_CPU))","")
   BIG_ENDIAN := 0
   PIC ?= 1
   NO_ASM := 1
-  $(warning Architecture "$(HOST_CPU)" not officially supported.')
+  $(info Architecture "$(HOST_CPU)" not officially supported, but supported by RMG)
 endif
 ifneq ("$(filter arm%,$(HOST_CPU))","")
   ifeq ("$(filter arm%b,$(HOST_CPU))","")

@@ -216,6 +216,24 @@ ExternalProject_Add(mupen64plus-video-GLideN64
     BUILD_BYPRODUCTS ${GLIDEN64_BUILD_DIR}/plugin/${GLIDEN64_BUILD_TYPE}/mupen64plus-video-GLideN64.${SO_EXT}
 )
 
+ExternalProject_Add(mupen64plus-video-rice
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-video-rice/
+
+    CONFIGURE_COMMAND ""
+    INSTALL_COMMAND ""
+
+    BUILD_COMMAND ${MAKE_CMD} all -f ${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-video-rice/projects/unix/Makefile
+        SRCDIR=${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-video-rice/src
+        APIDIR=${APIDIR} DEBUG=${MAKE_DEBUG} POSTFIX=
+        CC=${MAKE_CC_COMPILER} CXX=${MAKE_CXX_COMPILER}
+        OPTFLAGS=${MAKE_OPTFLAGS} ${PPC_MAKE_FLAGS}
+    BUILD_IN_SOURCE False
+    BUILD_ALWAYS True
+    BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/mupen64plus-video-rice
+
+    BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/mupen64plus-video-rice/mupen64plus-video-rice.${SO_EXT}
+)
+
 ExternalProject_Add(mupen64plus-video-parallel
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-video-parallel
 
@@ -286,6 +304,9 @@ endif(USE_ANGRYLION)
 ExternalProject_Get_property(mupen64plus-video-GLideN64 BUILD_BYPRODUCTS)
 set(MUPEN64PLUS_PLUGIN_GFX_GLIDEN64 ${BUILD_BYPRODUCTS} PARENT_SCOPE)
 set(MUPEN64PLUS_PLUGIN_GFX_GLIDEN64_DATA ${GLIDEN64_CUSTOM_INI} PARENT_SCOPE)
+
+ExternalProject_Get_property(mupen64plus-video-rice BUILD_BYPRODUCTS)
+set(MUPEN64PLUS_PLUGIN_GFX_RICE ${BUILD_BYPRODUCTS} PARENT_SCOPE)
 
 ExternalProject_Get_property(mupen64plus-video-parallel BUILD_BYPRODUCTS)
 set(MUPEN64PLUS_PLUGIN_GFX_PARALLEL ${BUILD_BYPRODUCTS} PARENT_SCOPE)
