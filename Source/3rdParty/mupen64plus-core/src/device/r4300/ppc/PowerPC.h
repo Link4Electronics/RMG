@@ -563,7 +563,7 @@ typedef unsigned int PowerPC_instr;
       PPC_SET_BI    (ppc, (bi)); }
 
 #define GEN_BNE(ppc,cr,dst,aa,lk) \
-    GEN_BC(ppc,dst,aa,lk,16,cr*4+2)
+    GEN_BC(ppc,dst,aa,lk,4,cr*4+2)
 
 #define GEN_BEQ(ppc,cr,dst,aa,lk) \
     GEN_BC(ppc,dst,aa,lk,12,cr*4+2)
@@ -1122,7 +1122,7 @@ typedef unsigned int PowerPC_instr;
       PPC_SET_BI    (ppc, bi); }
 
 #define GEN_BNELR(ppc,cr,lk) \
-    GEN_BCLR(ppc,lk,16,cr*4+2)
+    GEN_BCLR(ppc,lk,4,cr*4+2)
 
 #define GEN_BLELR(ppc,cr,lk) \
     GEN_BCLR(ppc,lk,4,cr*4+1)
