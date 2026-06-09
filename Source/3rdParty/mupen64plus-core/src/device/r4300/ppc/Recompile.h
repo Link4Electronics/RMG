@@ -24,6 +24,7 @@ typedef struct func {
     unsigned int end_address;
     PowerPC_instr* code;
     unsigned int   code_length;
+    unsigned int   code_alloc_size;
     unsigned int   lru;
     PowerPC_func_link_node* links_in;
     PowerPC_func_node*      links_out;

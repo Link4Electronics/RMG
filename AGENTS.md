@@ -32,7 +32,7 @@ Build system passes `-DM64P_BIG_ENDIAN` when `HOST_CPU` matches `ppc64*` / `powe
 
 ## Dynarec reference: mupen64-360
 
-**Source:** `/run/media/orestes/Guinea_pig/Projetos/mupen64-360/`  
+**Source:** `https://github.com/gligli/mupen64-360`  
 **Origin:** Wii64 → mupen64-360 (Xbox 360 / Xenon PPC port)
 
 ### Key files (PPC dynarec)

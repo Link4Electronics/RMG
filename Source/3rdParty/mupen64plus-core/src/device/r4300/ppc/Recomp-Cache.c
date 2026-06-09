@@ -2,6 +2,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <assert.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 #include "Recompile.h"
 #include "Wrappers.h"
@@ -132,7 +134,7 @@ static void unlink_func(PowerPC_func* func){
 
 static void free_func(PowerPC_func* func, unsigned int addr){
     func->magic = 0;
-    free(func->code);
+    munmap(func->code, func->code_alloc_size);
     MetaCache_Free(func->code_addr);
     PowerPC_block* block = blocks_get(addr>>12);
     if(block) remove_func(&block->funcs, func);
@@ -176,11 +178,16 @@ void RecompCache_Alloc(unsigned int size, unsigned int address, PowerPC_func* fu
     newBlock->size = size;
     newBlock->func = func;
 
-    void* code = malloc(size);
-    while(!code){
+    long pagesize = sysconf(_SC_PAGESIZE);
+    size_t aligned_size = ((size + pagesize - 1) / pagesize) * pagesize;
+    void* code = mmap(NULL, aligned_size, PROT_READ | PROT_WRITE | PROT_EXEC,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    while(code == MAP_FAILED){
         release(size);
-        code = malloc(size);
+        code = mmap(NULL, aligned_size, PROT_READ | PROT_WRITE | PROT_EXEC,
+                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     }
+    func->code_alloc_size = aligned_size;
     int num_instrs = (func->end_address - func->start_address + 4) >> 2;
     void* code_addr = MetaCache_Alloc(num_instrs * sizeof(void*));
 
