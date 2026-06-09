@@ -424,6 +424,13 @@ typedef unsigned int PowerPC_instr;
       PPC_SET_RA    (ppc, (ra)); \
       PPC_SET_IMMED (ppc, (immed)); }
 
+#define GEN_LD(ppc,rd,immed,ra) \
+    { ppc = NEW_PPC_INSTR(); \
+      PPC_SET_OPCODE(ppc, 58); \
+      PPC_SET_RD    (ppc, (rd)); \
+      PPC_SET_RA    (ppc, (ra)); \
+      PPC_SET_IMMED (ppc, (immed)); }
+
 #define GEN_LHZ(ppc,rd,immed,ra) \
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_LHZ); \

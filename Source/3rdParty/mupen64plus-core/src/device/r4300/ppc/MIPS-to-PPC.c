@@ -1092,7 +1092,7 @@ static int ERET(MIPS_instr mips){
     EMIT_STW(DYNAREG_ZERO, extractLower16(&llbit), 4);
     EMIT_STW(3, 12*4, DYNAREG_COP0);
     EMIT_B(add_jump((uintptr_t)(&check_interupt), 1, 1), 0, 1);
-    EMIT_LWZ(0, DYNAOFF_LR, 1);
+    EMIT_LD(0, DYNAOFF_LR, 1);
     EMIT_LWZ(3, 14*4, DYNAREG_COP0);
     EMIT_MTLR(0);
     EMIT_BLR(0);
@@ -1336,7 +1336,7 @@ static int SQRT_FP(MIPS_instr mips, int dbl){
     EMIT_B(add_jump((dbl ? (uintptr_t)&sqrt : (uintptr_t)&sqrtf), 1, 1), 0, 1);
     fr=mapFPRNew( MIPS_GET_FD(mips), dbl );
     EMIT_FMR(fr,1);
-    EMIT_LWZ(0, DYNAOFF_LR, 1);
+    EMIT_LD(0, DYNAOFF_LR, 1);
     EMIT_MTLR(0);
     return CONVERT_SUCCESS;
 }
@@ -1388,7 +1388,7 @@ static int ROUND_L_FP(MIPS_instr mips, int dbl){
     EMIT_B(add_jump((dbl ? (uintptr_t)&__fixdfdi : (uintptr_t)&__fixsfdi), 1, 1), 0, 1);
     int addr = 5;
     EMIT_LWZ(addr, fd*4, DYNAREG_FPR_64);
-    EMIT_LWZ(0, DYNAOFF_LR, 1);
+    EMIT_LD(0, DYNAOFF_LR, 1);
     EMIT_STW(3, 0, addr);
     EMIT_MTLR(0);
     EMIT_STW(4, 4, addr);
@@ -1404,7 +1404,7 @@ static int TRUNC_L_FP(MIPS_instr mips, int dbl){
     EMIT_B(add_jump((dbl ? (uintptr_t)&__fixdfdi : (uintptr_t)&__fixsfdi), 1, 1), 0, 1);
     int addr = 5;
     EMIT_LWZ(addr, fd*4, DYNAREG_FPR_64);
-    EMIT_LWZ(0, DYNAOFF_LR, 1);
+    EMIT_LD(0, DYNAOFF_LR, 1);
     EMIT_STW(3, 0, addr);
     EMIT_MTLR(0);
     EMIT_STW(4, 4, addr);
@@ -1421,7 +1421,7 @@ static int CEIL_L_FP(MIPS_instr mips, int dbl){
     EMIT_B(add_jump((dbl ? (uintptr_t)&__fixdfdi : (uintptr_t)&__fixsfdi), 1, 1), 0, 1);
     int addr = 5;
     EMIT_LWZ(addr, fd*4, DYNAREG_FPR_64);
-    EMIT_LWZ(0, DYNAOFF_LR, 1);
+    EMIT_LD(0, DYNAOFF_LR, 1);
     EMIT_STW(3, 0, addr);
     EMIT_MTLR(0);
     EMIT_STW(4, 4, addr);
@@ -1438,7 +1438,7 @@ static int FLOOR_L_FP(MIPS_instr mips, int dbl){
     EMIT_B(add_jump((dbl ? (uintptr_t)&__fixdfdi : (uintptr_t)&__fixsfdi), 1, 1), 0, 1);
     int addr = 5;
     EMIT_LWZ(addr, fd*4, DYNAREG_FPR_64);
-    EMIT_LWZ(0, DYNAOFF_LR, 1);
+    EMIT_LD(0, DYNAOFF_LR, 1);
     EMIT_STW(3, 0, addr);
     EMIT_MTLR(0);
     EMIT_STW(4, 4, addr);
@@ -1543,7 +1543,7 @@ static int CVT_L_FP(MIPS_instr mips, int dbl){
     EMIT_B(add_jump((dbl ? (uintptr_t)&__fixdfdi : (uintptr_t)&__fixsfdi), 1, 1), 0, 1);
     int addr = 5;
     EMIT_LWZ(addr, fd*4, DYNAREG_FPR_64);
-    EMIT_LWZ(0, DYNAOFF_LR, 1);
+    EMIT_LD(0, DYNAOFF_LR, 1);
     EMIT_STW(3, 0, addr);
     EMIT_MTLR(0);
     EMIT_STW(4, 4, addr);
@@ -1806,7 +1806,7 @@ static int CVT_FP_L(MIPS_instr mips, int dbl){
     EMIT_OR(4,lo,lo);
     EMIT_B(add_jump((dbl ? (uintptr_t)&__floatdidf : (uintptr_t)&__floatdisf), 1, 1), 0, 1);
     EMIT_FMR(fd,1);
-    EMIT_LWZ(0, DYNAOFF_LR, 1);
+    EMIT_LD(0, DYNAOFF_LR, 1);
     EMIT_MTLR(0);
     unmapRegisterTemp(hi);
     unmapRegisterTemp(lo);
@@ -1851,7 +1851,7 @@ static void genCallInterp(MIPS_instr mips){
     EMIT_ORI(3, 3, mips);
     EMIT_ORI(4, 4, get_src_pc());
     EMIT_B(add_jump((uintptr_t)(&decodeNInterpret), 1, 1), 0, 1);
-    EMIT_LWZ(0, DYNAOFF_LR, 1);
+    EMIT_LD(0, DYNAOFF_LR, 1);
     EMIT_CMPI(3, 0, 6);
     EMIT_MTLR(0);
     EMIT_BNELR(6, 0);
@@ -1909,7 +1909,7 @@ static void genCheckFP(void){
         EMIT_LI(4, isDelaySlot ? 1 : 0);
         EMIT_ORI(3, 3, get_src_pc());
         EMIT_B(add_jump((uintptr_t)(&dyna_check_cop1_unusable), 1, 1), 0, 1);
-        EMIT_LWZ(0, DYNAOFF_LR, 1);
+        EMIT_LD(0, DYNAOFF_LR, 1);
         EMIT_MTLR(0);
         EMIT_BLR(0);
         FP_need_check = isDelaySlot;
@@ -1923,7 +1923,7 @@ void genCallDynaMem(memType type, int base, short immed){
     EMIT_ORI(6, 6, get_src_pc()+4);
     EMIT_LI(7, isDelaySlot ? 1 : 0);
     EMIT_B(add_jump((uintptr_t)(&dyna_mem), 1, 1), 0, 1);
-    EMIT_LWZ(0, DYNAOFF_LR, 1);
+    EMIT_LD(0, DYNAOFF_LR, 1);
     EMIT_CMPI(3, 0, 6);
     EMIT_MTLR(0);
     EMIT_BNELR(6, 0);

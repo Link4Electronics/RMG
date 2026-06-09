@@ -108,6 +108,8 @@ int disassemble(unsigned int a, unsigned int op);
 {PowerPC_instr ppc;GEN_LI(ppc,rd,immed);set_next_dst(ppc);}
 #define EMIT_LWZ(rd,immed,ra) \
 {PowerPC_instr ppc;GEN_LWZ(ppc,rd,immed,ra);set_next_dst(ppc);}
+#define EMIT_LD(rd,immed,ra) \
+{PowerPC_instr ppc;GEN_LD(ppc,rd,immed,ra);set_next_dst(ppc);}
 #define EMIT_LHZ(rd,immed,ra) \
 {PowerPC_instr ppc;GEN_LHZ(ppc,rd,immed,ra);set_next_dst(ppc);}
 #define EMIT_LHA(rd,immed,ra) \
