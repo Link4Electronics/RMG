@@ -31,78 +31,28 @@ The target has **no assembly dynarec** — currently falls back to pure/cached i
 
 Build system passes `-DM64P_BIG_ENDIAN` when `HOST_CPU` matches `ppc64*` / `powerpc64*`.
 
-## Dynarec reference: mupen64-360
+---
 
-**Source:** `https://github.com/gligli/mupen64-360`  
+## PPC dynarec integration
+
+### Reference: mupen64-360
+
+**Source:** `https://github.com/gligli/mupen64-360`
 **Origin:** Wii64 → mupen64-360 (Xbox 360 / Xenon PPC port)
 
-### Key files (PPC dynarec)
+### File inventory
 
-| File | Role |
-|------|------|
-| `source/r4300/ppc/MIPS-to-PPC.c` | MIPS→PPC instruction translator (~4000 lines) |
-| `source/r4300/ppc/Recompile.c` | Block compilation, caching, execution |
-| `source/r4300/ppc/Register-Cache.c` | GPR/FPR register allocator |
-| `source/r4300/ppc/Wrappers.c` | `dynarec()` entry point, `dyna_run()` trampoline |
-| `source/r4300/ppc/PowerPC.h` | PPC instruction encoding macros (~200 opcodes) |
-| `source/r4300/ppc/MIPS.h` | MIPS opcode decoding helpers |
-| `source/r4300/ppc/FuncTree.c` | BST for recompiled block lookup |
-| `source/r4300/ppc/Recomp-Cache.c` | Recompiled code cache with LRU |
-| `source/r4300/ppc/disasm/` | Full PPC + AltiVec disassembler |
-
-### Key findings
-
-1. **No VMX128 in the CPU dynarec** — The recompiler emits only scalar PPC (add, lwz, stw, rlwinm, etc.). The LVX/STVX/VOR macros in `Recompile.h` are standard AltiVec and unused.
-2. **Xenon-specific code** only in: cache management (`memdcbf`, `memicbi`, `DCFlushRange`, `ICInvalidateRange`), heap (`__lwp_heap_*` from libogc), and platform headers (`<ppc/cache.h>`, `<debug.h>`, `<xetypes.h>`).
-3. **dyna_run() trampoline** uses standard PPC 32-bit ABI (r14-r23 saved regs, standard stack frame) — no Xenon-specific asm.
-4. **FPU handling** (`fpu.h`) uses Xenon SPE instructions (`mfspefscr`/`mtspefscr`) — must be replaced with standard `mtfsf`/`mffs` or `<fenv.h>`.
-
-### Porting to standard PPC Linux
-
-Replace:
-- `#include <ppc/cache.h>` + `memdcbf()`/`memicbi()` → inline `dcbf`/`icbi` asm or `__builtin___clear_cache()`
-- `#include <debug.h>` → drop or use `printf`
-- `#include <ppc/timebase.h>` → `mftb()` via inline asm
-- `#include <xetypes.h>` → `<stdint.h>` with `uint32_t`
-- `__lwp_heap_*` → `malloc()`/`free()` + manual LRU
-- `section(".bss.beginning.upper")` → `__attribute__((aligned(65536)))`
-- `mfspefscr`/`mtspefscr` → `mffs`/`mtfsf` or `<fenv.h>` `fesetround()`
-- Compile with `-mcpu=G4` or `-mcpu=G5 -maltivec` instead of `-mcpu=cell`
-- Link as standard `.so` instead of Xenon ELF binary
-
-### Integration into mupen64plus-core
-
-The mupen64-360 dynarec does **not** match the old dynarec interface (`recomp.c` + `dynarec.c` + `assemble.c` + `regcache.c`). Two approaches:
-
-**A. Standalone (`PPC_DYNAREC` path)** — Add as a new backend alongside existing ones with `#ifdef PPC_DYNAREC` in `r4300_core.h`/`r4300_core.c`, using the mupen64-360's own block dispatch.
-
-**B. New Dynarec backend** — Could also target `new_dynarec/` but would require a PPC assembly backend (`assem_ppc.c` + `linkage_ppc.S`) matching Ari64's architecture — this is a much larger effort.
-
-The **A. Standalone path** is more practical: the mupen64-360 code already has its own complete dispatch loop, block cache, and translator that can replace the entire r4300 execution path when `EMUMODE_DYNAREC` is selected.
-
-## AltiVec strategy
-
-Since the existing mupen64-360 dynarec doesn't use any vector instructions, adding AltiVec would be a **new feature** (no risk of breaking VMX128). Targets:
-
-1. **Vectorized memory fill/copy** for RDRAM operations
-2. **Parallel flag computation** for MIPS condition codes
-3. **Vectorized COP1 (FPU)** operations using AltiVec
-
-The existing `EMIT_LVX`/`EMIT_STVX`/`EMIT_VOR` macros in `Recompile.h` are standard AltiVec and work on both G4/G5 and Xenon without modification.
-
-## PPC dynarec integration status
-
-All 11 PPC dynarec source files created in `device/r4300/ppc/` (from mupen64-360, adapted for RMG):
+All files in `device/r4300/ppc/`:
 
 | File | Lines | Role |
 |------|-------|------|
 | `MIPS-to-PPC.c` | 2098+ | MIPS→PPC instruction translator (+ `emit_64bit_call`) |
-| `PowerPC.h` | 1156 | PPC instruction encoding macros (~200 opcodes) |
-| `ppc_dynarec.c` | 558 | Main entry: `dynarec()` loop, `decodeNInterpret()`, `dyna_mem()`, trampoline |
+| `PowerPC.h` | 1179 | PPC instruction encoding macros (~200 opcodes) |
+| `ppc_dynarec.c` | ~1000 | Main entry: `dynarec()` loop, `decodeNInterpret()`, `dyna_mem()`, trampoline |
 | `Recompile.h` | 318 | EMIT_* macros, block compilation interface |
 | `MIPS.h` | 279 | MIPS opcode decoding helpers |
 | `Recomp-Cache.c` | 256 | Recompiled code cache with LRU |
-| `Recompile.c` | 382 | Block compilation, jump fixup, `genJumpPad()` LR restore fix |
+| `Recompile.c` | 382 | Block compilation, jump fixup, `genJumpPad()` |
 | `Register-Cache.c` | 345 | GPR/FPR register allocator |
 | `FuncTree.c` | 61 | BST for recompiled block lookup |
 | `ppc_dynarec_compat.h` | 69 | Shim: extern globals, inline wrappers |
@@ -132,7 +82,7 @@ All 11 PPC dynarec source files created in `device/r4300/ppc/` (from mupen64-360
 | Interrupt check | `check_interupt()` inline asm | C function calling `gen_interrupt()` |
 | TLB | `tlb_map()` with bare args | `tlb_map(&r4300->cp0.tlb, entry)` |
 
-### Critical PPC64 type width fixes
+### PPC64 type width fixes
 
 PPC64 has 8-byte `long` and `unsigned long`. The recompiled PPC code uses 32-bit `lwz`/`stw` to access these globals, requiring exact 4-byte alignment:
 
@@ -145,35 +95,97 @@ PPC64 has 8-byte `long` and `unsigned long`. The recompiled PPC code uses 32-bit
 
 `reg[36]` stays `long long` (8 bytes) — correct, as recompiled code accesses low 32 bits at offset `i*8+4` on big-endian.
 
-### PPC64 bugs found during bringup
+---
 
-| Bug | Fix | File | Lines |
-|-----|-----|------|-------|
-| `get_physical_addr()` returned loaded data values instead of translated addresses | Added proper TLB address translation path | `ppc_dynarec.c` | 533-544 |
-| `genJumpPad()` emitted `BLR` without restoring LR | Added `LD r0, DYNAOFF_LR(r1)` + `MTLR r0` before `BLR` | `Recompile.c` | 173-174 |
-| `lwz` used for LR restore (32-bit on PPC64) | Changed to `ld` (64-bit) | `MIPS-to-PPC.c` | 1095, 1912 |
-| **`bl` ±32 MB range exceeded**: mmap'd code buffer can be 575+ MB from library text segment; all 14 CALL jumps silently overflow 24-bit LI field and jump to garbage | Replaced all `EMIT_B(add_jump(..., 1, 1), 0, 1)` with `emit_64bit_call()` — loads full 64-bit address into r12, `mtctr` + `bctrl` for unlimited range | `MIPS-to-PPC.c` | `emit_64bit_call()` at line ~37, 14 call sites across file |
-| **FAILSAFE_REC_NO_VM not set**: fast memory path (`genCallDynaMemVM` lines 1947-2073) emits direct PPC loads/stores at N64 KSEG1 addresses `(addr & 0x1FFFFFFF) \| 0x40000000` — unmapped on Linux | Set `failsafeRec \|= FAILSAFE_REC_NO_VM` in `ppc_dynarec_init()` to force slow path via `dyna_mem()` C function | `ppc_dynarec.c` | 488 |
-| **Register allocator uses r2/r13 on PPC64 ELFv2**: r2=TOC pointer, r13=thread pointer/small data area. If allocator maps a MIPS GPR to r2/r13, all C function calls from recompiled code have corrupted TOC/DSA. | Set `availableRegsDefault[2]=0` and `availableRegsDefault[13]=0` in `Register-Cache.c` to reserve them. Only r24-r31 are now available for MIPS GPR mapping. | `Register-Cache.c` | 13-17 |
-| **`bl 4` trampoline wrong on Linux GAS**: Xenon assembler interprets `bl 4` as `bl .+4` (skip 1 instruction), but Linux GAS interprets it as `bl` to absolute address 4 — huge negative offset, skips `mtctr`, so `bctrl` hits uninitialized CTR (32-bit truncated address → crash at `0x00000000CC076770`). | Changed `bl 4` to `bl .+4` (standard GAS idiom). Also merged two separate asm blocks into one to prevent compiler from corrupting DYNAREG (r14-r23) between blocks. | `ppc_dynarec.c` | 97-136 |
-| **D-cache/I-cache coherency**: `dcbf` is a hint instruction (can be ignored); `ICInvalidateRange` had no `sync` before `isync`. | Changed `dcbf` → `dcbst` (guaranteed store-back to memory); added `sync` before `isync` in `ICInvalidateRange`. | `Recomp-Cache.c` | 13-29 |
+## Bug history
 
-The `emit_64bit_call()` helper uses r12 (consistent with PPC64 ELFv2 ABI for function entry point):
-```c
-static void emit_64bit_call(uintptr_t target) {
-    PowerPC_instr tmp;
-    uint64_t t = (uint64_t)target;
-    EMIT_LIS(12, (t >> 48) & 0xFFFF);
-    EMIT_ORI(12, 12, (t >> 32) & 0xFFFF);
-    GEN_RLDICR(tmp, 12, 12, 32, 31, 0); set_next_dst(tmp);
-    EMIT_ORIS(12, 12, (t >> 16) & 0xFFFF);
-    EMIT_ORI(12, 12, t & 0xFFFF);
-    EMIT_MTCTR(12);
-    EMIT_BCTRL(0);
-}
-```
+### Bug: `bl` ±32 MB range exceeded (FIXED)
 
-### Build system
+**Symptom:** mmap'd code buffer can be 575+ MB from library text segment; all 14 CALL jumps silently overflow 24-bit LI field and jump to garbage.
+
+**Fix:** Replaced all `EMIT_B(add_jump(..., 1, 1), 0, 1)` with `emit_64bit_call()` — loads full 64-bit address into r12, `mtctr` + `bctrl` for unlimited range. `MIPS-to-PPC.c`.
+
+### Bug: `bl 4` trampoline wrong on Linux GAS (FIXED)
+
+**Symptom:** Xenon assembler interprets `bl 4` as `bl .+4` (skip 1 instruction), but Linux GAS interprets it as `bl` to absolute address 4 — huge negative offset, skips `mtctr`, so `bctrl` hits uninitialized CTR (32-bit truncated address).
+
+**Fix:** Changed `bl 4` to `bl .+4` (standard GAS idiom). Also merged two separate asm blocks into one. `ppc_dynarec.c`.
+
+### Bug: Xenon SPR encoding on G5 (FIXED — root cause of the crash)
+
+**Symptom:** Crash at `0x00000000CC076770` (32-bit truncated address in CTR). The `bctrl` instruction jumps to garbage because CTR was never properly written.
+
+**Root cause:** The `GEN_MTCTR`/`GEN_MFCTR` macros in `PowerPC.h` used `PPC_SET_SPR(ppc, 0x120)` for CTR and `PPC_SET_SPR(ppc, 0x100)` for LR. These values are **Xenon-specific SPR numbers** (SPRN=288 and SPRN=256 respectively). On standard POWER-PC (G5), SPR 288 is undefined, so `mtspr 288, r12` is either an illegal instruction or writes to an implementation-specific register. The real CTR (SPRN=9) was left uninitialized, containing garbage from a previous function call.
+
+**Fix:** Changed SPR values from Xenon convention to standard POWER-PC numbers:
+- `0x120` → `9` (CTR)
+- `0x100` → `8` (LR)
+
+The `PPC_SET_SPR` macro itself (`(spr & 0x3FF) << 11`) is **correct** for standard POWER-PC split SPR encoding — it properly places `SPRN[0]` at physical bit 11 and `SPRN[9]` at physical bit 20, matching the ISA specification.
+
+**Verification:**
+- Bad: `0x7D8903A6` = `mtspr 288, r12` (Xenon SPR)
+- Good: `0x7D804BA6` = `mtspr 9, r12` = `mtctr r12` (standard)
+
+### Bug: FAILSAFE_REC_NO_VM not set (FIXED)
+
+**Symptom:** Fast memory path (`genCallDynaMemVM`) emits direct PPC loads/stores at N64 KSEG1 addresses `(addr & 0x1FFFFFFF) | 0x40000000` — unmapped on Linux.
+
+**Fix:** Set `failsafeRec |= FAILSAFE_REC_NO_VM` in `ppc_dynarec_init()` to force slow path via `dyna_mem()` C function. `ppc_dynarec.c`.
+
+### Bug: Register allocator uses r2/r13 on PPC64 ELFv2 (FIXED)
+
+**Symptom:** r2=TOC pointer, r13=thread pointer. If allocator maps a MIPS GPR to r2/r13, all C function calls from recompiled code have corrupted TOC/DSA.
+
+**Fix:** Set `availableRegsDefault[2]=0` and `availableRegsDefault[13]=0` in `Register-Cache.c`. Only r24-r31 available for MIPS GPR mapping.
+
+### Bug: D-cache/I-cache coherency (FIXED)
+
+**Symptom:** `dcbf` is a hint instruction (can be ignored); `ICInvalidateRange` had no `sync` before `isync`.
+
+**Fix:** Changed `dcbf` → `dcbst` (guaranteed store-back); added `sync` before `isync`. `Recomp-Cache.c`.
+
+### Bug: `get_physical_addr()` returned data instead of address (FIXED)
+
+**Symptom:** TLB translation returned loaded data values instead of translated addresses.
+
+**Fix:** Added proper TLB address translation path. `ppc_dynarec.c`.
+
+### Bug: `genJumpPad()` LR not restored (FIXED)
+
+**Symptom:** `genJumpPad()` emitted `BLR` without restoring LR.
+
+**Fix:** Added `LD r0, DYNAOFF_LR(r1)` + `MTLR r0` before `BLR`. `Recompile.c`.
+
+### Bug: `lwz` for LR restore on PPC64 (FIXED)
+
+**Symptom:** `lwz` used for LR restore (32-bit on PPC64) — only restores low 32 bits.
+
+**Fix:** Changed to `ld` (64-bit). `MIPS-to-PPC.c`.
+
+### Bug list reminder
+
+| Bug | File | Lines | Status |
+|-----|------|-------|--------|
+| `bl` range exceeded | `MIPS-to-PPC.c` | emit_64bit_call(), 14 call sites | FIXED |
+| `bl 4` GAS vs Xenon | `ppc_dynarec.c` | 97-136 | FIXED |
+| **Xenon SPR encoding** | `PowerPC.h` | **394, 401, 842, 849** | **FIXED (root cause)** |
+| FAILSAFE_REC_NO_VM | `ppc_dynarec.c` | 488 | FIXED |
+| r2/r13 register corruption | `Register-Cache.c` | 13-17 | FIXED |
+| D/I-cache coherency | `Recomp-Cache.c` | 13-29 | FIXED |
+| `get_physical_addr()` | `ppc_dynarec.c` | 533-544 | FIXED |
+| `genJumpPad()` LR restore | `Recompile.c` | 173-174 | FIXED |
+| `lwz` LR on PPC64 | `MIPS-to-PPC.c` | 1095, 1912 | FIXED |
+
+### Remaining concerns
+
+1. **Xenon-specific SPR values in other PowerPC.h macros** — Only `GEN_MTCTR`, `GEN_MFCTR`, `GEN_MTLR`, `GEN_MFLR` use non-standard SPR values; all other encodings (arithmetic, load/store, branch) are standard POWER-PC.
+2. **Floating-point control** — `fesetround()` / `mtfsf` / `mffs` path needs runtime verification that rounding mode is set correctly for N64 FE_TOWARDZERO emulation.
+3. **No VMX128 in the CPU dynarec** — The recompiler emits only scalar PPC (add, lwz, stw, rlwinm, etc.). LVX/STVX/VOR macros are standard AltiVec and work on both G4/G5 and Xenon.
+
+---
+
+## Build system
 
 Pass `-DPPC_DYNAREC=ON` to cmake. The `3rdParty/CMakeLists.txt` propagates:
 - `PPC_DYNAREC=$<BOOL:${PPC_DYNAREC}>` to core Makefile
