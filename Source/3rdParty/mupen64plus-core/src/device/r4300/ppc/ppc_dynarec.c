@@ -97,6 +97,7 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
         ? (void*)ppc_dynarec_r4300->rdram->dram : NULL;
 
     void* ptrs[11];
+    void** ptrs_addr = ptrs;
     ptrs[0] = (void*)reg;
     ptrs[1] = (void*)reg_cop0;
     ptrs[2] = (void*)reg_cop1_simple;
@@ -126,6 +127,7 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
         "ld     21, 56(%0)\n"
         "ld     22, 64(%0)\n"
         "addi   23, 0, 0  \n"
+        "std    22, 80(%0)\n"
         "ld     12, 72(%0)\n"
         "bl     .+4       \n"
         "mtctr  12        \n"
@@ -135,12 +137,11 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
         "sync             \n"
         "isync            \n"
         "bctrl            \n"
-        "std    22, 80(%0)\n"
         "mr     %1, 3     \n"
         "ld     %3, 20(1) \n"
         "mflr   %2        \n"
         "ld     1, 0(1)   \n"
-        : "+r" (ptrs),
+        : "+r" (ptrs_addr),
           "=r" (naddr), "=r" (link_branch), "=r" (return_addr)
         :
         : "cr0", "cr2",
