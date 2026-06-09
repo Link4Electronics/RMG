@@ -91,70 +91,69 @@ static void sync_back_state(struct r4300_core* r4300) {
 unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
     unsigned int naddr;
     PowerPC_instr* return_addr;
+    PowerPC_func* last_func_val;
 
     void* rdram_base = ppc_dynarec_r4300 && ppc_dynarec_r4300->rdram
         ? (void*)ppc_dynarec_r4300->rdram->dram : NULL;
 
-    register long long *r14_val asm("14");
-    register unsigned long *r15_val asm("15");
-    register long long *r16_val asm("16");
-    register double *r17_val asm("17");
-    register uint32_t *r18_val asm("18");
-    register void *r19_val asm("19");
-    register uint32_t *r20_val asm("20");
-    register uint32_t *r21_val asm("21");
-    register PowerPC_func *r22_val asm("22");
-    register unsigned int r23_val asm("23");
+    void* ptrs[11];
+    ptrs[0] = (void*)reg;
+    ptrs[1] = (void*)reg_cop0;
+    ptrs[2] = (void*)reg_cop1_simple;
+    ptrs[3] = (void*)reg_cop1_double;
+    ptrs[4] = (void*)&FCR31;
+    ptrs[5] = (void*)rdram_base;
+    ptrs[6] = (void*)&last_addr;
+    ptrs[7] = (void*)&next_interupt;
+    ptrs[8] = (void*)func;
+    ptrs[9] = (void*)code;
+
+    fprintf(stderr, "[PPC_DYN] dyna_run ptrs: reg=%p cop0=%p cop1s=%p cop1d=%p fcr31=%p rdram=%p last=%p nxtint=%p func=%p code=%p\n",
+            ptrs[0], ptrs[1], ptrs[2], ptrs[3], ptrs[4], ptrs[5],
+            ptrs[6], ptrs[7], ptrs[8], ptrs[9]);
 
     __asm__ volatile(
         "stdu   1, -32(1) \n"
         "mfcr   14        \n"
         "stw    14, 8(1)  \n"
-        "mr     14, %0    \n"
-        "mr     15, %1    \n"
-        "mr     16, %2    \n"
-        "mr     17, %3    \n"
-        "mr     18, %4    \n"
-        "mr     19, %5    \n"
-        "mr     20, %6    \n"
-        "mr     21, %7    \n"
-        "mr     22, %8    \n"
+        "ld     14, 0(%0) \n"
+        "ld     15, 8(%0) \n"
+        "ld     16, 16(%0)\n"
+        "ld     17, 24(%0)\n"
+        "ld     18, 32(%0)\n"
+        "ld     19, 40(%0)\n"
+        "ld     20, 48(%0)\n"
+        "ld     21, 56(%0)\n"
+        "ld     22, 64(%0)\n"
         "addi   23, 0, 0  \n"
-        : "=r" (r14_val), "=r" (r15_val), "=r" (r16_val), "=r" (r17_val),
-          "=r" (r18_val), "=r" (r19_val), "=r" (r20_val), "=r" (r21_val),
-          "=r" (r22_val), "=r" (r23_val)
-        : "r" (reg), "r" (reg_cop0),
-          "r" (reg_cop1_simple), "r" (reg_cop1_double),
-          "r" (&FCR31), "r" (rdram_base),
-          "r" (&last_addr), "r" (&next_interupt),
-          "r" (func));
-
-    __asm__ volatile(
+        "ld     12, 72(%0)\n"
         "bl     .+4       \n"
-        "mtctr  %4        \n"
+        "mtctr  12        \n"
         "mflr   4         \n"
         "addi   4, 4, 28  \n"
         "std    4, 20(1)  \n"
         "sync             \n"
         "isync            \n"
         "bctrl            \n"
-        "mr     %0, 3     \n"
-        "ld     %2, 20(1) \n"
-        "mflr   %1        \n"
-        "mr     %3, 22    \n"
+        "std    22, 80(%0)\n"
+        "mr     %1, 3     \n"
+        "ld     %3, 20(1) \n"
+        "mflr   %2        \n"
         "ld     1, 0(1)   \n"
-        : "=r" (naddr), "=r" (link_branch), "=r" (return_addr),
-          "=r" (last_func)
-        : "r" (code),
-          "r" (r14_val), "r" (r15_val), "r" (r16_val), "r" (r17_val),
-          "r" (r18_val), "r" (r19_val), "r" (r20_val), "r" (r21_val),
-          "r" (r22_val), "r" (r23_val)
+        : "+r" (ptrs),
+          "=r" (naddr), "=r" (link_branch), "=r" (return_addr)
+        :
         : "cr0", "cr2",
-            "8","9","10","11","12",
+            "4","8","9","10","11","12",
+            "14","15","16","17","18","19","20","21","22","23",
             "24","25","26","27","28","29","30","31","ctr","lr",
-            "%fr14","%fr15","%fr16","%fr17","%fr18","%fr19","%fr20","%fr21","%fr22","%fr23","%fr24","%fr25","%fr26","%fr27");
+            "%fr14","%fr15","%fr16","%fr17","%fr18","%fr19","%fr20","%fr21","%fr22","%fr23","%fr24","%fr25","%fr26","%fr27",
+            "memory");
+
+    last_func_val = (PowerPC_func*)((void**)ptrs)[10];
 
     link_branch = (link_branch == return_addr || link_branch == NULL) ? NULL : link_branch - 1;
+    last_func = last_func_val;
     return naddr;
 }
 

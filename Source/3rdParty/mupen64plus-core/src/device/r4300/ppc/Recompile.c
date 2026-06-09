@@ -274,6 +274,12 @@ PowerPC_func* recompile_block(PowerPC_block* ppc_block, unsigned int addr)
     DCFlushRange(func->code, func->code_length * sizeof(PowerPC_instr));
     ICInvalidateRange(func->code, func->code_length * sizeof(PowerPC_instr));
 
+    {
+        unsigned int* code32 = (unsigned int*)func->code;
+        fprintf(stderr, "[RECOMP] final code at %p: first 4 instrs = %08X %08X %08X %08X\n",
+                func->code, code32[0], code32[1], code32[2], code32[3]);
+    }
+
     return func;
 }
 
