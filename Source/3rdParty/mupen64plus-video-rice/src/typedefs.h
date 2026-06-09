@@ -23,6 +23,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "VectorMath.h"
 #include "osal_preproc.h"
 
+#if defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#define N64_XOR(x) (0)
+#else
+#define N64_XOR(x) (x)
+#endif
+
 #define uchar  unsigned char
 #define uint16 unsigned short
 #define uint32 unsigned int
@@ -45,8 +51,12 @@ typedef struct _COORDRECT
 // convert rgba values (0-255 per channel) to a DWORD in A8R8G8B8 order
 #define COLOR_RGBA(r,g,b,a) ((r&0xFF)<<16 | (g&0xFF)<<8 | (b&0xFF)<<0 | (a&0xFF)<<24)
 
-// convert DWORD R8G8B8A8 order to A8R8G8B8
-#define RGBA_TO_ARGB(rgba) ((rgba&0x000000FF)<<24 | (rgba&0xFF000000)>>8 | (rgba&0x00FF0000)>>8 | (rgba&0x0000FF00)>>8)
+// convert DWORD R8G8B8A8 order (from RDRAM, byte0=R,byte1=G,byte2=B,byte3=A) to A8R8G8B8
+#if defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#define RGBA_TO_ARGB(rgba) (rgba)
+#else
+#define RGBA_TO_ARGB(rgba) (((rgba) & 0xFF000000) | (((rgba) & 0x000000FF) << 16) | ((rgba) & 0x0000FF00) | (((rgba) & 0x00FF0000) >> 16))
+#endif
 
 #define SURFFMT_A8R8G8B8 21
 

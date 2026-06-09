@@ -2001,9 +2001,9 @@ void ProcessVertexDataConker(uint32 dwAddr, uint32 dwV0, uint32 dwNum)
         // can't generate tex coord)
         if (gRSP.bTextureGen && gRSP.bLightingEnable )
         {
-                g_normal.x = (float)*(char*)(g_pRDRAMu8+ (((i<<1)+0)^3)+dwConkerVtxZAddr);
-                g_normal.y = (float)*(char*)(g_pRDRAMu8+ (((i<<1)+1)^3)+dwConkerVtxZAddr);
-                g_normal.z = (float)*(char*)(g_pRDRAMu8+ (((i<<1)+2)^3)+dwConkerVtxZAddr);
+                g_normal.x = (float)*(char*)(g_pRDRAMu8+ (((i<<1)+0)^N64_XOR(3))+dwConkerVtxZAddr);
+                g_normal.y = (float)*(char*)(g_pRDRAMu8+ (((i<<1)+1)^N64_XOR(3))+dwConkerVtxZAddr);
+                g_normal.z = (float)*(char*)(g_pRDRAMu8+ (((i<<1)+2)^N64_XOR(3))+dwConkerVtxZAddr);
                 Vec3TransformNormal(g_normal, gRSPmodelViewTop);
                 TexGen(g_fVtxTxtCoords[i].x, g_fVtxTxtCoords[i].y);
         }

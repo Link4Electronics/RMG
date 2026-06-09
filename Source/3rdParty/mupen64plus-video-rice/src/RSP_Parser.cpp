@@ -1338,7 +1338,7 @@ void DLParser_FillRect(Gfx *gfx)
             {
                 for( uint32 j=x0; j<x1; j++ )
                 {
-                    *(uint16*)((base+pitch*i+j)^2) = color;
+                    *(uint16*)((base+pitch*i+j)^N64_XOR(2)) = color;
                 }
             }
         }
@@ -1365,7 +1365,7 @@ void DLParser_FillRect(Gfx *gfx)
                 {
                     for( uint32 j=x0; j<x1; j++ )
                     {
-                        *(uint16*)((base+pitch*i+j)^2) = color;
+                        *(uint16*)((base+pitch*i+j)^N64_XOR(2)) = color;
                     }
                 }
             }
@@ -1378,7 +1378,7 @@ void DLParser_FillRect(Gfx *gfx)
                 {
                     for( uint32 j=x0; j<x1; j++ )
                     {
-                        *(uint8*)((base+pitch*i+j)^3) = color;
+                        *(uint8*)((base+pitch*i+j)^N64_XOR(3)) = color;
                     }
                 }
             }

@@ -1921,7 +1921,7 @@ void FrameBufferManager::CopyBufferToRDRAM(uint32 addr, uint32 fmt, uint32 siz, 
                     uint8 a = pS0[indexes[j]+3];
 
                     // Liner
-                    *(pD+(j^1)) = ConvertRGBATo555( r, g, b, a);
+                    *(pD+(j^N64_XOR(1))) = ConvertRGBATo555( r, g, b, a);
                 }
             }
         }
@@ -1952,7 +1952,7 @@ void FrameBufferManager::CopyBufferToRDRAM(uint32 addr, uint32 fmt, uint32 siz, 
                                                 (pS[pos+3]));       // Alpha
                     
                     //*pD = CIFindIndex(tempword);
-                    *(pD+(j^3)) = RevTlutTable[tempword];
+                    *(pD+(j^N64_XOR(3))) = RevTlutTable[tempword];
                 }
             }
         }
@@ -1986,7 +1986,7 @@ void FrameBufferManager::CopyBufferToRDRAM(uint32 addr, uint32 fmt, uint32 siz, 
                     uint32 b = pS0[indexes[j]+0];
 
                     // Liner
-                    *(pD+(j^3)) = (uint8)((r+b+g)/3);
+                    *(pD+(j^N64_XOR(3))) = (uint8)((r+b+g)/3);
                 }
             }
         }

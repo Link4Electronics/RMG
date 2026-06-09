@@ -90,6 +90,8 @@ inline uint32 ReverseDXT(uint32 val, uint32 lrs, uint32 width, uint32 size)
     return  (low+high)/2;   //dxt = 2047 / (dxt-1);
 }
 
+#include <cstring>
+
 // The following inline assemble routines are borrowed from glN64, I am too tired to
 // rewrite these routine by myself.
 // Rice, 02/24/2004
@@ -280,6 +282,8 @@ Done:
          : "m"(src), "m"(dest), "m"(saveEBX), "m"(numBytes)
          : "memory", "cc", "%ecx", "%esi", "%edi", "%eax"
          );
+#else
+    memcpy(dest, src, numBytes);
 #endif
 }
 
@@ -330,9 +334,17 @@ DWordInterleaveLoop:
          "loop          0b                 \n" //loop   DWordInterleaveLoop
          "mov           %2, %%ebx          \n"
          :
-         : "m"(mem), "m"(numDWords), "m"(saveEBX)
-         : "memory", "cc", "%esi", "%edi", "%ecx", "%eax"
-         );
+          : "m"(mem), "m"(numDWords), "m"(saveEBX)
+          : "memory", "cc", "%esi", "%edi", "%ecx", "%eax"
+          );
+#else
+    uint32* p = (uint32*)mem;
+    for (uint32 i = 0; i < numDWords; i++)
+    {
+        uint32 tmp = p[i*2];
+        p[i*2] = p[i*2+1];
+        p[i*2+1] = tmp;
+    }
 #endif
 }
 
@@ -405,6 +417,17 @@ QWordInterleaveLoop:
         : "m"(mem), "m"(numDWords), "m"(saveEBX)
         : "memory", "cc", "%esi", "%edi", "%ecx", "%eax"
         );
+#else
+    uint32* p = (uint32*)mem;
+    for (uint32 i = 0; i < numDWords/2; i++)
+    {
+        uint32 t0 = p[i*4];
+        uint32 t1 = p[i*4+1];
+        p[i*4]   = p[i*4+2];
+        p[i*4+1] = p[i*4+3];
+        p[i*4+2] = t0;
+        p[i*4+3] = t1;
+    }
 #endif
 }
 
@@ -1227,12 +1250,12 @@ uint32 dwPalAddress = g_TI.dwAddr + dwRDRAMOffset;
 //Copy PAL to the PAL memory
 uint16 *srcPal = (uint16*)(g_pRDRAMu8 + (dwPalAddress& (g_dwRamSize-1)) );
 for (uint32 i=0; i<dwCount && i<0x100; i++)
-    g_wRDPTlut[(i+dwTMEMOffset)^1] = srcPal[i^1];
+    g_wRDPTlut[(i+dwTMEMOffset)^N64_XOR(1)] = srcPal[i^N64_XOR(1)];
 
 if( options.bUseFullTMEM )
     {
     for (uint32 i=0; i<dwCount && i+tile.dwTMem<0x200; i++)
-        *(uint16*)(&g_Tmem.g_Tmem64bit[tile.dwTMem+i]) = srcPal[i^1];
+        *(uint16*)(&g_Tmem.g_Tmem64bit[tile.dwTMem+i]) = srcPal[i^N64_XOR(1)];
     }
 
 LOG_TEXTURE(
