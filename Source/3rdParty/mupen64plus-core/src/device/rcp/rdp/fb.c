@@ -228,7 +228,7 @@ void protect_framebuffers(struct fb* fb)
         /* disable dynarec "fast memory" code generation to avoid direct memory accesses */
         if (fb->once) {
             fb->once = 0;
-#ifndef NEW_DYNAREC
+#if !defined(NEW_DYNAREC) && !defined(PPC_DYNAREC)
             fb->r4300->recomp.fast_memory = 0;
 #endif
 

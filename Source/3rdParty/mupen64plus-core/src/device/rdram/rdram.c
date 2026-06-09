@@ -127,10 +127,10 @@ static void map_corrupt_rdram(struct rdram* rdram, int corrupt)
     mapping.handler.write32 = write_rdram_dram;
 
     apply_mem_mapping(rdram->r4300->mem, &mapping);
-#ifndef NEW_DYNAREC
+#if !defined(NEW_DYNAREC) && !defined(PPC_DYNAREC)
     rdram->r4300->recomp.fast_memory = (corrupt) ? 0 : 1;
-    invalidate_r4300_cached_code(rdram->r4300, 0, 0);
 #endif
+    invalidate_r4300_cached_code(rdram->r4300, 0, 0);
 }
 
 
