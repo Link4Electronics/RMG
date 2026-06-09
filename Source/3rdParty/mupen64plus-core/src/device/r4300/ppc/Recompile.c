@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include "device/r4300/r4300_core.h"
 #include "device/r4300/cp0.h"
+#include "device/rdram/rdram.h"
 #include "ppc_dynarec_compat.h"
 #include "Recompile.h"
 #include "Recomp-Cache.h"
@@ -18,6 +19,7 @@ extern int set_next_dst_override_val;
 
 PowerPC_func* recompile_block(PowerPC_block* ppc_block, unsigned int addr){
     int i;
+    MIPS_instr instr;
     PowerPC_func* func;
     int jump_index;
     int max_instructions = 0x1000 / 4;
@@ -35,7 +37,7 @@ PowerPC_func* recompile_block(PowerPC_block* ppc_block, unsigned int addr){
     func->lru = 0;
 
     start_new_block();
-    src_ptr_global = (MIPS_instr*)(ppc_dynarec_r4300->ops->rdram() + (addr & 0x1FFFFFFF));
+    src_ptr_global = (MIPS_instr*)(ppc_dynarec_r4300->rdram->dram + ((addr & 0x1FFFFFFF) >> 2));
     src_pc_val = addr;
     dst_ptr_global = (PowerPC_instr*)func->code;
     set_next_dst_override_val = 0;
@@ -44,7 +46,7 @@ PowerPC_func* recompile_block(PowerPC_block* ppc_block, unsigned int addr){
         instr = get_next_src();
         if(MIPS_GET_OPCODE(instr) == 0 && MIPS_GET_FUNC(instr) == 0){
             /* NOP or similar */
-            EMIT_ORI(0, 0, 0, 0);
+            EMIT_ORI(0, 0, 0);
             continue;
         }
 
