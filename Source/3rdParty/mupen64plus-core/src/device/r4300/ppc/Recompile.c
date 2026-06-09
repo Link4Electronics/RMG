@@ -16,19 +16,165 @@ extern MIPS_instr* src_ptr_global;
 extern PowerPC_instr* dst_ptr_global;
 extern unsigned int src_pc_val;
 extern int set_next_dst_override_val;
+static PowerPC_instr code_buffer[64*1024];
+static PowerPC_instr* code_addr_buffer[1024];
+static unsigned char isJmpDst[1024];
 
-PowerPC_func* recompile_block(PowerPC_block* ppc_block, unsigned int addr){
+static PowerPC_func* cf;
+static jump_node jump_table[MAX_JUMPS];
+static unsigned int current_jump;
+
+void reset_code_addr(void)
+{
+    unsigned int idx = (src_pc_val - 4 - cf->start_address) >> 2;
+    if(idx < 1024)
+        code_addr_buffer[idx] = dst_ptr_global;
+}
+
+void nop_ignored(void)
+{
+    unsigned int idx = (src_pc_val - 4 - cf->start_address) >> 2;
+    if(idx < 1024)
+        code_addr_buffer[idx] = dst_ptr_global;
+}
+
+int is_j_out(int branch, int is_aa)
+{
+    if(is_aa)
+        return ((branch << 2 | (cf->start_address & 0xF0000000)) <  cf->start_address ||
+                (branch << 2 | (cf->start_address & 0xF0000000)) >= cf->end_address);
+    else {
+        int dst_instr = ((src_pc_val - cf->start_address - 4) >> 2) + branch;
+        return (dst_instr < 0 || dst_instr >= (int)((cf->end_address - cf->start_address) >> 2));
+    }
+}
+
+int is_j_dst(void)
+{
+    return isJmpDst[(get_src_pc() & 0xfff) >> 2];
+}
+
+static int pass0(PowerPC_block* ppc_block, PowerPC_func* func)
+{
     int i;
-    MIPS_instr instr;
-    PowerPC_func* func;
-    int jump_index;
-    int max_instructions = 0x1000 / 4;
-    int num_jumps = 0;
+    for(i = 0; i < 1024; ++i) isJmpDst[i] = 0;
 
-    func = MetaCache_Alloc(sizeof(PowerPC_func));
-    memset(func, 0, sizeof(PowerPC_func));
+    MIPS_instr* src = (MIPS_instr*)(ppc_dynarec_r4300->rdram->dram +
+        ((func->start_address & 0x1FFFFFFF) >> 2));
+    unsigned int vaddr = func->start_address;
+
+    while(vaddr < func->end_address) {
+        MIPS_instr mips = *src++;
+        int opcode = MIPS_GET_OPCODE(mips);
+        int index = (vaddr - ppc_block->start_address) >> 2;
+
+        if(opcode == MIPS_OPCODE_J || opcode == MIPS_OPCODE_JAL) {
+            unsigned int li = MIPS_GET_LI(mips);
+            unsigned int jump_dst = (li << 2) | (vaddr & 0xF0000000);
+            int out = (jump_dst < func->start_address || jump_dst >= func->end_address);
+            if(!out)
+                isJmpDst[li & 0x3FF] = 1;
+            if(opcode == MIPS_OPCODE_JAL && index + 2 < 1024)
+                isJmpDst[index + 2] = 1;
+            src++; vaddr += 4; /* skip delay slot */
+            if(opcode == MIPS_OPCODE_J) break;
+        } else if(opcode == MIPS_OPCODE_BEQ   ||
+                  opcode == MIPS_OPCODE_BNE   ||
+                  opcode == MIPS_OPCODE_BLEZ  ||
+                  opcode == MIPS_OPCODE_BGTZ  ||
+                  opcode == MIPS_OPCODE_BEQL  ||
+                  opcode == MIPS_OPCODE_BNEL  ||
+                  opcode == MIPS_OPCODE_BLEZL ||
+                  opcode == MIPS_OPCODE_BGTZL ||
+                  opcode == MIPS_OPCODE_B     ||
+                  (opcode == MIPS_OPCODE_COP1 &&
+                   MIPS_GET_RS(mips) == MIPS_FRMT_BC)) {
+            int bd = MIPS_GET_IMMED(mips);
+            bd = (bd & 0x8000) ? (bd | 0xFFFF0000) : bd; /* sign extend */
+            int dst_index = index + 1 + bd;
+            if(dst_index >= 0 && dst_index < 1024)
+                isJmpDst[dst_index] = 1;
+            if(index + 2 < 1024)
+                isJmpDst[index + 2] = 1;
+            src++; vaddr += 4; /* skip delay slot */
+        } else if(opcode == MIPS_OPCODE_R &&
+                  (MIPS_GET_FUNC(mips) == MIPS_FUNC_JR ||
+                   MIPS_GET_FUNC(mips) == MIPS_FUNC_JALR)) {
+            src++; vaddr += 4; /* skip delay slot */
+            break;
+        } else if(opcode == MIPS_OPCODE_COP0 &&
+                  MIPS_GET_FUNC(mips) == MIPS_FUNC_ERET) {
+            break;
+        }
+        vaddr += 4;
+    }
+
+    if(vaddr < func->end_address) {
+        func->end_address = vaddr;
+        return 0;
+    }
+    return 1;
+}
+
+static void pass2(PowerPC_block* ppc_block, PowerPC_func* func)
+{
+    int i;
+    for(i = 0; i < (int)current_jump; ++i) {
+        PowerPC_instr* current = jump_table[i].dst_instr;
+
+        if(jump_table[i].type & JUMP_TYPE_SPEC) {
+            if(!(jump_table[i].type & JUMP_TYPE_J)) {
+                *current &= ~(PPC_BD_MASK << PPC_BD_SHIFT);
+                PPC_SET_BD(*current, jump_table[i].new_jump);
+            } else {
+                *current &= ~(PPC_LI_MASK << PPC_LI_SHIFT);
+                PPC_SET_LI(*current, jump_table[i].new_jump);
+            }
+            continue;
+        }
+
+        if(jump_table[i].type & JUMP_TYPE_CALL) {
+            int jump_offset = ((uintptr_t)jump_table[i].old_jump -
+                               (uintptr_t)current) / 4;
+            *current &= ~(PPC_LI_MASK << PPC_LI_SHIFT);
+            PPC_SET_LI(*current, jump_offset);
+        } else if(!(jump_table[i].type & JUMP_TYPE_J)) {
+            int jump_offset = (unsigned int)jump_table[i].old_jump +
+                     ((jump_table[i].src_pc - func->start_address) >> 2);
+            jump_table[i].new_jump = func->code_addr[jump_offset] - current;
+            *current &= ~(PPC_LI_MASK << PPC_LI_SHIFT);
+            PPC_SET_LI(*current, jump_table[i].new_jump);
+        } else {
+            unsigned int jump_addr = (jump_table[i].old_jump << 2) |
+                                     (ppc_block->start_address & 0xF0000000);
+            int jump_offset = (jump_addr - func->start_address) >> 2;
+            jump_table[i].new_jump = func->code_addr[jump_offset] - current;
+            *current &= ~(PPC_LI_MASK << PPC_LI_SHIFT);
+            PPC_SET_LI(*current, jump_table[i].new_jump);
+        }
+    }
+}
+
+static void genJumpPad(void)
+{
+    EMIT_LIS(3, ((uintptr_t)(&noCheckInterrupt)) >> 16);
+    EMIT_ORI(3, 3, ((uintptr_t)(&noCheckInterrupt)) & 0xFFFF);
+    EMIT_LI(0, 1);
+    EMIT_STW(0, 0, 3);
+    EMIT_LIS(3, (get_src_pc() + 4) >> 16);
+    EMIT_ORI(3, 3, get_src_pc() + 4);
+    EMIT_BLR(0);
+}
+
+PowerPC_func* recompile_block(PowerPC_block* ppc_block, unsigned int addr)
+{
+    ppc_block->adler32 = 0;
+
+    PowerPC_func* func = calloc(1, sizeof(PowerPC_func));
+    cf = func;
+
     func->start_address = addr;
-    func->end_address = addr + 4;
+    func->end_address = ppc_block->end_address;
     func->magic = FUNC_MAGIC;
     func->code = NULL;
     func->code_length = 0;
@@ -36,145 +182,158 @@ PowerPC_func* recompile_block(PowerPC_block* ppc_block, unsigned int addr){
     func->links_out = NULL;
     func->lru = 0;
 
-    start_new_block();
-    src_ptr_global = (MIPS_instr*)(ppc_dynarec_r4300->rdram->dram + ((addr & 0x1FFFFFFF) >> 2));
+    int need_pad = pass0(ppc_block, func);
+
+    invalidate_func(func->end_address - 4);
+    insert_func(&ppc_block->funcs, func);
+
+    cf = func;
+
+    src_ptr_global = (MIPS_instr*)(ppc_dynarec_r4300->rdram->dram +
+        ((addr & 0x1FFFFFFF) >> 2));
     src_pc_val = addr;
-    dst_ptr_global = (PowerPC_instr*)func->code;
+    dst_ptr_global = code_buffer;
     set_next_dst_override_val = 0;
+    current_jump = 0;
+    memset(code_addr_buffer, 0, sizeof(code_addr_buffer));
 
-    for(i = 0; i < max_instructions; i++){
-        instr = get_next_src();
-        if(MIPS_GET_OPCODE(instr) == 0 && MIPS_GET_FUNC(instr) == 0){
-            /* NOP or similar */
-            EMIT_ORI(0, 0, 0);
-            continue;
-        }
+    start_new_block();
+    isJmpDst[(src_pc_val - ppc_block->start_address) >> 2] = 1;
 
-        if(mips_is_jump(instr)){
-            jump_index = add_jump(num_jumps,
-                MIPS_GET_OPCODE(instr) == MIPS_OPCODE_J ||
-                MIPS_GET_OPCODE(instr) == MIPS_OPCODE_JAL,
-                MIPS_GET_OPCODE(instr) == MIPS_OPCODE_JAL ||
-                (MIPS_GET_OPCODE(instr) == MIPS_OPCODE_R &&
-                 MIPS_GET_FUNC(instr) == MIPS_FUNC_JALR));
-
-            if(jump_index < 0) break;
-
-            ppc_block->flags[(addr - ppc_block->start_address)>>2] = 1;
-            func->end_address = src_pc_val;
-            break;
-        }
-
-        if(convert() == CONVERT_ERROR){
-            printf("PPC dynarec: convert error at 0x%08x, falling back\n", src_pc_val-4);
-            break;
-        }
-
-        if(ppc_block->flags[(src_pc_val - ppc_block->start_address)>>2] & BLOCK_FLAG_SPLIT){
-            func->end_address = src_pc_val;
-            break;
-        }
-
-        if(num_jumps > MAX_JUMPS){
-            printf("PPC dynarec: too many jumps\n");
-            break;
-        }
+    int i;
+    for(i = 0; i < 1024; ++i) {
+        if(ppc_block->flags[i] & BLOCK_FLAG_SPLIT)
+            isJmpDst[i] = 1;
     }
 
-    func->code_length = (unsigned int)((unsigned long)dst_ptr_global - (unsigned long)func->code);
+    need_pad |= isJmpDst[(func->end_address - 4 - ppc_block->start_address) >> 2];
 
-    if(func->code_length == 0){
-        MetaCache_Free(func);
+    while(src_pc_val < func->end_address) {
+        unsigned int offset = (src_pc_val - ppc_block->start_address) >> 2;
+        if(isJmpDst[offset]) {
+            src_pc_val += 4;
+            start_new_mapping();
+            src_pc_val -= 4;
+        }
+        convert();
+    }
+
+    flushRegisters();
+
+    if(need_pad)
+        genJumpPad();
+
+    func->code_length = (unsigned int)(dst_ptr_global - code_buffer);
+
+    if(func->code_length == 0) {
+        free(func);
         return NULL;
     }
 
-    RecompCache_Alloc(func->code_length, addr, func);
-    memcpy(func->code, dst_ptr_global, func->code_length);
+    RecompCache_Alloc(func->code_length * sizeof(PowerPC_instr), addr, func);
 
-    DCFlushRange(func->code, func->code_length);
-    ICInvalidateRange(func->code, func->code_length);
+    memcpy(func->code, code_buffer, func->code_length * sizeof(PowerPC_instr));
+    unsigned int num_instrs = (func->end_address - func->start_address + 4) >> 2;
+    unsigned int copy_size = (num_instrs < 1024) ? num_instrs : 1024;
+    memcpy(func->code_addr, code_addr_buffer, copy_size * sizeof(PowerPC_instr*));
 
-    insert_func(&ppc_block->funcs, func);
+    /* Adjust code_addr pointers from compile buffer to final buffer */
+    int idx;
+    for(idx = 0; idx < (int)copy_size; ++idx)
+        if(func->code_addr[idx])
+            func->code_addr[idx] = func->code + (func->code_addr[idx] - code_buffer);
+
+    /* Adjust jump table pointers from compile buffer to final buffer */
+    for(idx = 0; idx < (int)current_jump; ++idx)
+        jump_table[idx].dst_instr = func->code +
+            (jump_table[idx].dst_instr - code_buffer);
+
+    /* Fix up jump/branch instructions */
+    pass2(ppc_block, func);
+
+    DCFlushRange(func->code, func->code_length * sizeof(PowerPC_instr));
+    ICInvalidateRange(func->code, func->code_length * sizeof(PowerPC_instr));
 
     return func;
 }
 
-static jump_node jumps[MAX_JUMPS];
-static int jump_pos = 0;
+int mips_is_jump(MIPS_instr instr)
+{
+    int opcode = MIPS_GET_OPCODE(instr);
+    int format = MIPS_GET_RS(instr);
+    int func   = MIPS_GET_FUNC(instr);
+    return (opcode == MIPS_OPCODE_J     ||
+            opcode == MIPS_OPCODE_JAL   ||
+            opcode == MIPS_OPCODE_BEQ   ||
+            opcode == MIPS_OPCODE_BNE   ||
+            opcode == MIPS_OPCODE_BLEZ  ||
+            opcode == MIPS_OPCODE_BGTZ  ||
+            opcode == MIPS_OPCODE_BEQL  ||
+            opcode == MIPS_OPCODE_BNEL  ||
+            opcode == MIPS_OPCODE_BLEZL ||
+            opcode == MIPS_OPCODE_BGTZL ||
+            opcode == MIPS_OPCODE_B     ||
+            (opcode == MIPS_OPCODE_R    &&
+             (func  == MIPS_FUNC_JR     ||
+              func  == MIPS_FUNC_JALR)) ||
+            (opcode == MIPS_OPCODE_COP1 &&
+             format == MIPS_FRMT_BC));
+}
 
-int mips_is_jump(MIPS_instr instr){
-    unsigned int op = MIPS_GET_OPCODE(instr);
-    if(op == MIPS_OPCODE_J || op == MIPS_OPCODE_JAL)
-        return 1;
-    if(op == MIPS_OPCODE_R){
-        unsigned int func = MIPS_GET_FUNC(instr);
-        if(func == MIPS_FUNC_JR || func == MIPS_FUNC_JALR)
-            return 1;
+int add_jump(int old_jump, int is_j, int is_call)
+{
+    if(current_jump >= MAX_JUMPS) return -1;
+    int id = current_jump;
+    jump_node* jump = &jump_table[current_jump++];
+    jump->old_jump  = old_jump;
+    jump->new_jump  = 0;
+    jump->src_pc    = src_pc_val - 4;
+    jump->dst_instr = dst_ptr_global;
+    jump->type      = (is_j    ? JUMP_TYPE_J    : 0)
+                    | (is_call ? JUMP_TYPE_CALL : 0);
+    return id;
+}
+
+int add_jump_special(int is_j)
+{
+    if(current_jump >= MAX_JUMPS) return -1;
+    int id = current_jump;
+    jump_node* jump = &jump_table[current_jump++];
+    jump->new_jump  = 0;
+    jump->dst_instr = dst_ptr_global;
+    jump->type      = JUMP_TYPE_SPEC | (is_j ? JUMP_TYPE_J : 0);
+    return id;
+}
+
+void set_jump_special(int which, int new_jump)
+{
+    if(which < (int)current_jump && which >= 0) {
+        jump_node* jump = &jump_table[which];
+        if(!(jump->type & JUMP_TYPE_SPEC)) return;
+        jump->new_jump = new_jump;
     }
-    if(op == MIPS_OPCODE_BEQ || op == MIPS_OPCODE_BNE ||
-       op == MIPS_OPCODE_BLEZ || op == MIPS_OPCODE_BGTZ ||
-       op == MIPS_OPCODE_BEQL || op == MIPS_OPCODE_BNEL ||
-       op == MIPS_OPCODE_BLEZL || op == MIPS_OPCODE_BGTZL)
-        return 1;
-    unsigned int rt = MIPS_GET_RA(instr);
-    if(op == MIPS_OPCODE_B &&
-       (rt == MIPS_RT_BLTZ || rt == MIPS_RT_BGEZ ||
-        rt == MIPS_RT_BLTZL || rt == MIPS_RT_BGEZL ||
-        rt == MIPS_RT_BLTZAL || rt == MIPS_RT_BGEZAL ||
-        rt == MIPS_RT_BLTZALL || rt == MIPS_RT_BGEZALL))
-        return 1;
-    return 0;
 }
 
-int add_jump(int old_jump, int is_j, int is_call){
-    if(jump_pos >= MAX_JUMPS) return -1;
-    int pos = jump_pos++;
-    jumps[pos].src_pc = src_pc_val;
-    jumps[pos].dst_instr = dst_ptr_global;
-    jumps[pos].old_jump = old_jump;
-    jumps[pos].new_jump = 0;
-    jumps[pos].type = 0;
-    if(is_j)      jumps[pos].type |= JUMP_TYPE_J;
-    if(is_call)   jumps[pos].type |= JUMP_TYPE_CALL;
-    return pos;
-}
-
-int is_j_out(int branch, int is_aa){
-    return 0;
-}
-
-int is_j_dst(void){
-    return 0;
-}
-
-int add_jump_special(int is_j){
-    return add_jump(0, is_j, 0);
-}
-
-void set_jump_special(int which, int new_jump){
-    if(which < jump_pos && which >= 0){
-        jumps[which].new_jump = new_jump;
-    }
-}
-
-PowerPC_block* blocks_get(unsigned int idx){
+PowerPC_block* blocks_get(unsigned int idx)
+{
     if(idx < 0x100000)
         return blocks[idx];
     return NULL;
 }
 
-void init_block(PowerPC_block* ppc_block){
+void init_block(PowerPC_block* ppc_block)
+{
     if(ppc_block) {
         memset(ppc_block->flags, 0, sizeof(ppc_block->flags));
         ppc_block->funcs = NULL;
     }
-    jump_pos = 0;
     invalidateRegisters();
 }
 
-void deinit_block(PowerPC_block* ppc_block){
-    if(ppc_block){
-        if(ppc_block->funcs){
+void deinit_block(PowerPC_block* ppc_block)
+{
+    if(ppc_block) {
+        if(ppc_block->funcs) {
             PowerPC_func_node* node = ppc_block->funcs;
             remove_outgoing_links(&node, NULL);
         }
@@ -182,9 +341,10 @@ void deinit_block(PowerPC_block* ppc_block){
     }
 }
 
-void invalidate_block(PowerPC_block* ppc_block){
-    invalid_code[ppc_block->start_address>>12] = 0;
-    if(ppc_block->funcs){
+void invalidate_block(PowerPC_block* ppc_block)
+{
+    invalid_code[ppc_block->start_address >> 12] = 0;
+    if(ppc_block->funcs) {
         PowerPC_func_node* node = ppc_block->funcs;
         remove_outgoing_links(&node, NULL);
     }
@@ -193,10 +353,10 @@ void invalidate_block(PowerPC_block* ppc_block){
 }
 
 char txtbuffer[1024];
-
 int do_disasm = 0;
 
-int disassemble(unsigned int a, unsigned int op){
+int disassemble(unsigned int a, unsigned int op)
+{
     (void)a; (void)op;
     return 0;
 }

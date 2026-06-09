@@ -90,6 +90,7 @@ int set_next_dst_override_val;
 PowerPC_instr set_next_dst_instr_val;
 
 MIPS_instr get_next_src(void){
+    src_pc_val += 4;
     return *src_ptr_global++;
 }
 
@@ -103,13 +104,11 @@ PowerPC_instr* get_curr_dst(void){
 
 void unget_last_src(void){
     src_ptr_global--;
-}
-
-void nop_ignored(void){
+    src_pc_val -= 4;
 }
 
 unsigned int get_src_pc(void){
-    return src_pc_val;
+    return src_pc_val - 4;
 }
 
 void set_next_dst(PowerPC_instr instr){
@@ -121,12 +120,7 @@ void set_next_dst(PowerPC_instr instr){
     }
 }
 
-void reset_code_addr(void){
-    src_pc_val = 0;
-    src_ptr_global = NULL;
-    dst_ptr_global = NULL;
-    set_next_dst_override_val = 0;
-}
+/* reset_code_addr is defined in Recompile.c to track code_addr_buffer */
 
 static int (*gen_ops[64])(MIPS_instr);
 
