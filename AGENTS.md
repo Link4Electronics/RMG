@@ -232,6 +232,9 @@ With optimization ≥ `-O1`, GCC's register allocator reuses r14-r23 (declared d
 | **MTFSFI immediate field position** | `PowerPC.h` | 1021-1026 | FIXED |
 | **HEAP_PARENT shift (>>2→>>1)** | `Recomp-Cache.c` | 46 | FIXED |
 | **Split asm blocks in dyna_run** | `ppc_dynarec.c` | 98-137 | FIXED |
+| **branch() BO/BI values (CR4 + polarity)** | `MIPS-to-PPC.c` | 197-205 | FIXED |
+| **start_new_block() stale-code** | `MIPS-to-PPC.c` | 112-116 | FIXED |
+| **rldicl after lis** | `PowerPC.h`, `Recompile.h` | 627-636, 165-166 | FIXED |
 
 ### Known issues
 
