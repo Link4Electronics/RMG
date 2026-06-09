@@ -253,6 +253,9 @@ void dynarec(unsigned int address){
     fprintf(stderr, "[PPC_DYN] dynarec() exiting, final address=0x%08X\n", address);
 }
 
+/* Forward declaration of read_rmg_word (defined later in this file) */
+static void read_rmg_word(uint32_t vaddr, uint32_t* val);
+
 /* Read a MIPS instruction word from N64 memory at virtual address */
 static MIPS_instr read_mips_mem(uint32_t vaddr) {
     uint32_t wval = 0;
@@ -669,7 +672,7 @@ unsigned int decodeNInterpret(MIPS_instr mips, unsigned int pc,
                 }
                 if (subfunc != MIPS_FUNC_CVT_S_) {
                     *reg_cop1_double[fd] = r;
-                    reg_cop1_fgr_64[fd] = *(int64_t*)&r;
+                    { union { double d; int64_t i; } _u; _u.d = r; reg_cop1_fgr_64[fd] = _u.i; }
                 }
                 interp_addr = pc + 4;
                 break;
