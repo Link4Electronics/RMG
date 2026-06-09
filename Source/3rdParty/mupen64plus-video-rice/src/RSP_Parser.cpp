@@ -347,6 +347,9 @@ void DLParser_Init()
     memset(&g_ZI, 0, sizeof(SetImgInfo));
     memset(&g_CI, 0, sizeof(SetImgInfo));
     memset(&g_TI, 0, sizeof(SetImgInfo));
+    fprintf(stderr, "RICE: g_TI init (DLParser_Init) fmt=%d siz=%d width=%d addr=0x%08X bpl=%d\n",
+        g_TI.dwFormat, g_TI.dwSize, g_TI.dwWidth, g_TI.dwAddr, g_TI.bpl);
+    fflush(stderr);
 
     status.UseLargerTile[0] = status.UseLargerTile[1] = false;
     status.LargerTileRealLeft[0] = status.LargerTileRealLeft[1] = 0;
@@ -906,6 +909,16 @@ void DLParser_Process(OSTask * pTask)
                 gDlistStack[gDlistStackPointer].pc, pgfx->words.w0, pgfx->words.w1, (gRSP.ucode!=5&&gRSP.ucode!=10)?ucodeNames_GBI1[(pgfx->words.w0>>24)]:ucodeNames_GBI2[(pgfx->words.w0>>24)]);
 #endif
             gDlistStack[gDlistStackPointer].pc += 8;
+            {
+                static int cmdCount = 0;
+                if (cmdCount < 500) {
+                    fprintf(stderr, "RICE: cmd[%d] pc=%08X w0=%08X w1=%08X op=%02X\n",
+                        cmdCount, gDlistStack[gDlistStackPointer].pc - 8,
+                        pgfx->words.w0, pgfx->words.w1, pgfx->words.w0 >> 24);
+                    fflush(stderr);
+                }
+                cmdCount++;
+            }
             currentUcodeMap[pgfx->words.w0 >>24](pgfx);
 
             if ( gDlistStackPointer >= 0 && --gDlistStack[gDlistStackPointer].countdown < 0 )

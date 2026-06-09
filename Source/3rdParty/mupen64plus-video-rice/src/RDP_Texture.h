@@ -1759,6 +1759,10 @@ void DLParser_SetTImg(Gfx *gfx)
     g_TI.dwAddr     = RSPSegmentAddr((gfx->setimg.addr));
     g_TI.bpl        = g_TI.dwWidth << g_TI.dwSize >> 1;
 
+    fprintf(stderr, "RICE: SetTImg w0=0x%08X w1=0x%08X fmt=%d siz=%d width=%d addr=0x%08X\n",
+        gfx->words.w0, gfx->words.w1, g_TI.dwFormat, g_TI.dwSize, g_TI.dwWidth, g_TI.dwAddr);
+    fflush(stderr);
+
 #ifdef DEBUGGER
     if( g_TI.dwAddr == 0x00ffffff)
     {
