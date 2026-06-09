@@ -488,6 +488,7 @@ unsigned int dyna_mem(unsigned int value, unsigned int addr,
 }
 
 void ppc_dynarec_init(struct r4300_core* r4300) {
+    failsafeRec |= FAILSAFE_REC_NO_VM;
     ppc_dynarec_r4300 = r4300;
     sync_r4300_state(r4300);
 
