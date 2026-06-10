@@ -260,6 +260,8 @@ void dynarec(unsigned int address){
                     (void*)func, (void*)code, (void*)&dyna_mem, dist/1024,
                     (dist < 0x2000000LL && dist > -0x2000000LL) ? "IN" : "OUT");
         }
+        if (last_addr == 0)
+            last_addr = address - 4;
         interp_addr = address = dyna_run(func, code);
         if (dbg_iter <= 50) {
             fprintf(stderr, "[PPC_DYN] dyna_run returned naddr=0x%08X link_branch=0x%p\n",
