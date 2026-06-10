@@ -44,6 +44,7 @@ int noCheckInterrupt = 0;
 int failsafeRec = 0;
 int llbit = 0;
 uint32_t delay_slot = 0;
+volatile uint32_t dyna_canary[16] = {0};
 
 /* CP0 register convenience pointers */
 static struct cp0* ppc_cp0 = NULL;
@@ -96,7 +97,9 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
     void* rdram_base = ppc_dynarec_r4300 && ppc_dynarec_r4300->rdram
         ? (void*)ppc_dynarec_r4300->rdram->dram : NULL;
 
-    void* ptrs[11];
+    dyna_canary[0] = 1;  /* entered dyna_run before asm */
+
+    void* ptrs[13];
     void** ptrs_addr = ptrs;
     ptrs[0] = (void*)reg;
     ptrs[1] = (void*)reg_cop0;
@@ -108,6 +111,8 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
     ptrs[7] = (void*)&next_interupt;
     ptrs[8] = (void*)func;
     ptrs[9] = (void*)code;
+    ptrs[10] = (void*)func;
+    ptrs[11] = (void*)dyna_canary;
 
     fprintf(stderr, "[PPC_DYN] dyna_run ptrs: reg=%p cop0=%p cop1s=%p cop1d=%p fcr31=%p rdram=%p last=%p nxtint=%p func=%p code=%p\n",
             ptrs[0], ptrs[1], ptrs[2], ptrs[3], ptrs[4], ptrs[5],
@@ -126,7 +131,9 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
         "ld     20, 48(%0)\n"
         "ld     21, 56(%0)\n"
         "ld     22, 64(%0)\n"
-        "addi   23, 0, 0  \n"
+        "ld     23, 88(%0)\n"
+        "li     0, 0xCC   \n"
+        "stw    0, 48(23) \n"
         "std    22, 80(%0)\n"
         "ld     12, 72(%0)\n"
         "bl     .+4       \n"
@@ -150,6 +157,8 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
             "24","25","26","27","28","29","30","31","ctr","lr",
             "%fr14","%fr15","%fr16","%fr17","%fr18","%fr19","%fr20","%fr21","%fr22","%fr23","%fr24","%fr25","%fr26","%fr27",
             "memory");
+
+    dyna_canary[5] = 1;  /* returned from asm block */
 
     last_func_val = (PowerPC_func*)((void**)ptrs)[10];
 
@@ -249,9 +258,14 @@ void dynarec(unsigned int address){
                     (dist < 0x2000000LL && dist > -0x2000000LL) ? "IN" : "OUT");
         }
         interp_addr = address = dyna_run(func, code);
-        if (dbg_iter <= 50)
+        if (dbg_iter <= 50) {
             fprintf(stderr, "[PPC_DYN] dyna_run returned naddr=0x%08X link_branch=0x%p\n",
                     interp_addr, (void*)link_branch);
+            fprintf(stderr, "[PPC_DYN] CANARY [0]=%d [3]=%d [4]=%d [5]=%d "
+                    "[10]=0x%02X [11]=0x%02X [12]=0x%02X [13]=0x%02X\n",
+                    dyna_canary[0], dyna_canary[3], dyna_canary[4], dyna_canary[5],
+                    dyna_canary[10], dyna_canary[11], dyna_canary[12], dyna_canary[13]);
+        }
 
         if(!noCheckInterrupt){
             last_addr = interp_addr;
@@ -815,6 +829,7 @@ static void write_rmg_word(uint32_t vaddr, uint32_t val, uint32_t mask) {
 static int memdbg=0;
 unsigned int dyna_mem(unsigned int value, unsigned int addr,
                       memType type, unsigned int pc, int isDelaySlot){
+    dyna_canary[3] = 1;  /* entered dyna_mem */
     if (++memdbg <= 10) fprintf(stderr, "[dyna_mem] type=%d addr=0x%08X pc=0x%08X\n", type, addr, pc);
     uint32_t wval = 0;
     uint64_t dval = 0;
@@ -932,6 +947,7 @@ unsigned int dyna_mem(unsigned int value, unsigned int addr,
             *r4300_stop(ppc_dynarec_r4300) = 1;
         break;
     }
+    dyna_canary[4] = 1;  /* completed dyna_mem switch */
     delay_slot = 0;
     noCheckInterrupt = 0;
     return interp_addr != pc ? interp_addr : 0;

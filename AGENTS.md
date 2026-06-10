@@ -463,3 +463,33 @@ These symptoms are consistent with `GSetImg` reading all zero fields (because `w
    - RDRAM endian access via `g_pRDRAMu32[pc>>2]` (should be correct, uses host byte order)
    - Any remaining struct-style access to RDRAM data not covered by the Gfx union
 6. Once video output works, optionally return to PPC dynarec testing
+
+## PPC dynarec canary debugging
+
+`volatile uint32_t dyna_canary[16]` inserted at 7 points to isolate where the OOT hang occurs. Printed in `dynarec()` loop when `dbg_iter <= 50`.
+
+| Slot | Set by | Value | Meaning |
+|------|--------|-------|---------|
+| `[0]` | `dyna_run()` C code before asm | `1` | `dyna_run` entered |
+| `[3]` | `dyna_mem()` entry | `1` | dyna_mem reached |
+| `[4]` | `dyna_mem()` after switch | `1` | dyna_mem completed |
+| `[5]` | `dyna_run()` C code after asm | `1` | asm block returned |
+| `[10]` | Compiled PPC code before 1st `bctrl` | `0xCC` | 1st genCallDynaMem reached |
+| `[11]` | Compiled PPC code after 1st `bctrl` | `0xDD` | 1st dyna_mem returned |
+| `[12]` | Trampoline `stw 0, 48(23)` before `bctrl` | `0xCC` | r23 loaded, trampoline OK |
+| `[13]` | Compiled PPC code before 2nd+ `bctrl` | `0xEE` | Subsequent genCallDynaMem reached |
+
+### Files
+- `ppc_dynarec.c`: `dyna_canary[16]` global, C-code stores [0]/[5], `dyna_mem()` stores [3]/[4], trampoline `ld` of r23 and store [12], print in `dynarec()` loop
+- `MIPS-to-PPC.c`: `genCallDynaMem()` emits compiled stores for [10]/[11] (1st call) and [13] (subseq calls) using `mem_call_seq` counter
+
+### Reading the CANARY line
+```
+CANARY [0]=1 [3]=0 [4]=0 [5]=0 [10]=0x00 [11]=0x00 [12]=0xCC
+```
+- `[12]=0xCC` + `[0]=1` + `[5]=0`: trampoline ran, `bctrl` never returned → hang in compiled code
+  - `[10]=0xCC`: bctrl for 1st dyna_mem is about to be called but never returns
+  - `[10]=0x00`: code hung before reaching the first memory access (earlier instruction)
+- `[3]=1` + `[4]=0`: dyna_mem entered but hung inside the switch
+- `[11]=0xDD` + `[5]=0`: dyna_mem returned but asm block never completed (BNELR or subsequent call hung)
+- `[13]=0xEE`: at least two memory accesses reached in compiled code
