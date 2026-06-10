@@ -1954,11 +1954,18 @@ static void genCheckFP(void){
         reset_code_addr();
         EMIT_LWZ(0, 12*4, DYNAREG_COP0);
         EMIT_ANDIS(0, 0, 0x2000);
-        EMIT_BNE(0, 8, 0, 0);
+        EMIT_BNE(0, 10, 0, 0);  /* skip to BLR_fallthrough if CU1 set */
         EMIT_LIS(3, get_src_pc()>>16);
         EMIT_LI(4, isDelaySlot ? 1 : 0);
         EMIT_ORI(3, 3, get_src_pc());
-        emit_64bit_call((uintptr_t)(&dyna_check_cop1_unusable));
+        /* Store args and return to dispatcher */
+        EMIT_STW(3, 40*4, 31);   /* r3 = pc */
+        EMIT_STW(4, 41*4, 31);   /* r4 = isDelaySlot */
+        EMIT_LI(0, 2);            /* target_idx = 2 (dyna_check_cop1_unusable) */
+        EMIT_STW(0, 45*4, 31);
+        EMIT_LI(0, 1);            /* pending = 1 */
+        EMIT_STW(0, 46*4, 31);
+        /* BLR_fallthrough: */
         EMIT_LD(0, DYNAOFF_LR, 1);
         EMIT_MTLR(0);
         EMIT_BLR(0);
@@ -1969,13 +1976,6 @@ static void genCheckFP(void){
 static int mem_call_seq = 0;
 
 void genCallDynaMem(memType type, int base, short immed){
-    if (mem_call_seq == 0) {
-        EMIT_LI(0, 0xCC);
-        EMIT_STW(0, 40, 31);      /* canary[10] = 0xCC (1st call, before dyna_mem) */
-    } else {
-        EMIT_LI(0, 0xEE);
-        EMIT_STW(0, 44, 31);      /* canary[11] = 0xEE (subseq call, before dyna_mem) */
-    }
     mem_call_seq++;
 
     EMIT_LIS(6, (get_src_pc()+4)>>16);
@@ -1983,23 +1983,27 @@ void genCallDynaMem(memType type, int base, short immed){
     EMIT_LI(5, type);
     EMIT_ORI(6, 6, get_src_pc()+4);
     EMIT_LI(7, isDelaySlot ? 1 : 0);
-    if (mem_call_seq == 1) {
-        /* First memory access: call dyna_test via bctrl.
-         * dyna_test writes canary[8]=0xFE on entry (C-code-only slot,
-         * not touched by compiled code or trampoline).
-         * If [8]=0xFE: function entered but bctrl didn't return (crashed
-         * in prologue/epilogue). If [8]=0xAA: never entered at all. */
-        emit_64bit_call((uintptr_t)(&dyna_test));
-        EMIT_LI(0, 0xDD);
-        EMIT_STW(0, 44, 31);      /* canary[11] = 0xDD (bctrl returned) */
-    } else {
-        emit_64bit_call((uintptr_t)(&dyna_mem));
-    }
 
+    /* Store args to canary for C-side dispatcher.
+     * r31 = canary base (uint32_t[48]). Slots 40-47 reserved for call state.
+     * bctrl from the mmap'd code buffer hangs on PPC970, so instead of
+     * calling dyna_mem directly, we return to the dispatcher which
+     * calls it from C context and re-enters compiled code. */
+    EMIT_STW(3, 40*4, 31);   /* value (r3)  → canary[40] */
+    EMIT_STW(4, 41*4, 31);   /* addr (r4)   → canary[41] */
+    EMIT_STW(5, 42*4, 31);   /* type (r5)   → canary[42] */
+    EMIT_STW(6, 43*4, 31);   /* pc (r6)     → canary[43] */
+    EMIT_STW(7, 44*4, 31);   /* delaySlot   → canary[44] */
+    EMIT_LI(0, 1);            /* target_idx = 1 (dyna_mem) */
+    EMIT_STW(0, 45*4, 31);
+    EMIT_LI(0, 1);            /* pending = 1 */
+    EMIT_STW(0, 46*4, 31);
+
+    /* Return to dispatcher — dynarec loop detects pending call
+     * and invokes dyna_mem from C context. */
     EMIT_LD(0, DYNAOFF_LR, 1);
-    EMIT_CMPI(3, 0, 6);
     EMIT_MTLR(0);
-    EMIT_BNELR(6, 0);
+    EMIT_BLR(0);
 }
 
 static int genCallDynaMemVM(int rs_reg, int rt_reg, memType type, int immed){

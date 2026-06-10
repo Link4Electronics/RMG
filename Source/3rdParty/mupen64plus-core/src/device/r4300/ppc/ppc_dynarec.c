@@ -56,12 +56,16 @@ static void dyna_alarm_handler(int sig) {
             "[0]=%d [3]=%d [8]=0x%02X [9]=0x%02X "
             "[10]=0x%02X [11]=0x%02X [12]=0x%02X "
             "[30]=0x%08X [31]=0x%08X "
-            "[36]=0x%08X [37]=0x%08X [38]=0x%08X [39]=0x%08X\n",
+            "[36]=0x%08X [37]=0x%08X [38]=0x%08X [39]=0x%08X "
+            "[40]=0x%08X [41]=0x%08X [42]=0x%08X "
+            "[43]=0x%08X [44]=0x%08X [45]=0x%08X [46]=0x%08X\n",
             dyna_canary[0], dyna_canary[3],
             dyna_canary[8], dyna_canary[9],
             dyna_canary[10], dyna_canary[11], dyna_canary[12],
             dyna_canary[30], dyna_canary[31],
-            dyna_canary[36], dyna_canary[37], dyna_canary[38], dyna_canary[39]);
+            dyna_canary[36], dyna_canary[37], dyna_canary[38], dyna_canary[39],
+            dyna_canary[40], dyna_canary[41], dyna_canary[42],
+            dyna_canary[43], dyna_canary[44], dyna_canary[45], dyna_canary[46]);
     _exit(1);
 }
 
@@ -296,11 +300,13 @@ void dynarec(unsigned int address){
             fprintf(stderr, "[PPC_DYN] PRE-RUN CANARY: "
                     "[0]=%d [3]=%d [8]=0x%02X [9]=0x%02X "
                     "[10]=0x%02X [11]=0x%02X [12]=0x%02X "
-                    "[30]=0x%08X [31]=0x%08X\n",
+                    "[30]=0x%08X [31]=0x%08X "
+                    "[46]=0x%08X\n",
                     dyna_canary[0], dyna_canary[3],
                     dyna_canary[8], dyna_canary[9],
                     dyna_canary[10], dyna_canary[11], dyna_canary[12],
-                    dyna_canary[30], dyna_canary[31]);
+                    dyna_canary[30], dyna_canary[31],
+                    dyna_canary[46]);
         }
         /* Reset canary for this run, then set 5-second timeout */
         memset((void*)dyna_canary, 0, sizeof(dyna_canary));
@@ -335,12 +341,48 @@ void dynarec(unsigned int address){
             fprintf(stderr, "[PPC_DYN] CANARY [0]=%d [3]=%d [8]=0x%02X [9]=0x%02X "
                     "[10]=0x%02X [11]=0x%02X [12]=0x%02X "
                     "[30]=0x%08X [31]=0x%08X "
-                    "[36]=0x%08X [37]=0x%08X [38]=0x%08X [39]=0x%08X\n",
+                    "[36]=0x%08X [37]=0x%08X [38]=0x%08X [39]=0x%08X "
+                    "[40]=0x%08X [41]=0x%08X [42]=0x%08X "
+                    "[43]=0x%08X [44]=0x%08X [45]=0x%08X [46]=0x%08X\n",
                     dyna_canary[0], dyna_canary[3],
                     dyna_canary[8], dyna_canary[9],
                     dyna_canary[10], dyna_canary[11], dyna_canary[12],
                     dyna_canary[30], dyna_canary[31],
-                    dyna_canary[36], dyna_canary[37], dyna_canary[38], dyna_canary[39]);
+                    dyna_canary[36], dyna_canary[37], dyna_canary[38], dyna_canary[39],
+                    dyna_canary[40], dyna_canary[41], dyna_canary[42],
+                    dyna_canary[43], dyna_canary[44], dyna_canary[45], dyna_canary[46]);
+        }
+
+        /* Check for pending C function call from compiled code.
+         * genCallDynaMem/genCheckFP store args to canary[40..46]
+         * and BLR to dispatcher instead of using bctrl (which hangs
+         * on PPC970 from the mmap'd RWX code buffer). We make the
+         * call from C context here and continue at the next MIPS PC. */
+        if (dyna_canary[46]) {
+            dyna_canary[46] = 0;
+            unsigned int tgt = dyna_canary[45];
+            unsigned int result = 0;
+            switch (tgt) {
+            case 1: /* dyna_mem */
+                result = dyna_mem(dyna_canary[40], dyna_canary[41],
+                                (memType)dyna_canary[42], dyna_canary[43],
+                                (int)dyna_canary[44]);
+                if (result == 0)
+                    address = dyna_canary[43]; /* next MIPS instr */
+                else
+                    address = result;           /* exception handler */
+                break;
+            case 2: /* dyna_check_cop1_unusable */
+                dyna_check_cop1_unusable(dyna_canary[40], (int)dyna_canary[41]);
+                address = interp_addr; /* set to exception handler */
+                break;
+            default:
+                fprintf(stderr, "[PPC_DYN] unknown pending call tgt=%u\n", tgt);
+                break;
+            }
+            interp_addr = address;
+            noCheckInterrupt = 0;
+            continue; /* re-enter loop at new address */
         }
 
         if(!noCheckInterrupt){
