@@ -1981,11 +1981,16 @@ void genCallDynaMem(memType type, int base, short immed){
     EMIT_LI(5, type);
     EMIT_ORI(6, 6, get_src_pc()+4);
     EMIT_LI(7, isDelaySlot ? 1 : 0);
-    emit_64bit_call((uintptr_t)(&dyna_mem));
+    if (mem_call_seq == 1) {
+        /* First call goes to dyna_test to verify bctrl mechanism works */
+        emit_64bit_call((uintptr_t)(&dyna_test));
+    } else {
+        emit_64bit_call((uintptr_t)(&dyna_mem));
+    }
 
     if (mem_call_seq == 1) {
         EMIT_LI(0, 0xDD);
-        EMIT_STW(0, 44, 31);      /* canary[11] = 0xDD (1st call, returned from dyna_mem) */
+        EMIT_STW(0, 44, 31);      /* canary[11] = 0xDD (first call returned) */
     }
     EMIT_LD(0, DYNAOFF_LR, 1);
     EMIT_CMPI(3, 0, 6);

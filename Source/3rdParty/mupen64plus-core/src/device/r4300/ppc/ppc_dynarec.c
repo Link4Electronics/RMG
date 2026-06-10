@@ -873,6 +873,14 @@ static void write_rmg_word(uint32_t vaddr, uint32_t val, uint32_t mask) {
 #define BE_INSERT_BYTE(w, val, b)  ((w) = ((w) & ~(0xFFU  << (24 - ((b)<<3)))) | (((uint32_t)(val) & 0xFFU)  << (24 - ((b)<<3))))
 #define BE_INSERT_HWORD(w, val, b) ((w) = ((w) & ~(0xFFFFU << (16 - ((b)<<4)))) | (((uint32_t)(val) & 0xFFFFU) << (16 - ((b)<<4))))
 
+/* Test function: same signature as dyna_mem, just sets canary and returns 0.
+ * Used to verify whether bctrl reaches the called function at all. */
+unsigned int dyna_test(unsigned int value, unsigned int addr,
+                       memType type, unsigned int pc, int isDelaySlot){
+    dyna_canary[9] = 0xFE;
+    return 0;
+}
+
 static int memdbg=0;
 unsigned int dyna_mem(unsigned int value, unsigned int addr,
                       memType type, unsigned int pc, int isDelaySlot){
