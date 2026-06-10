@@ -121,11 +121,7 @@ PPC64 has 8-byte `long` and `unsigned long`. The recompiled PPC code uses 32-bit
 - `0x120` → `9` (CTR)
 - `0x100` → `8` (LR)
 
-The `PPC_SET_SPR` macro itself (`(spr & 0x3FF) << 11`) is **correct** for standard POWER-PC split SPR encoding — it properly places `SPRN[0]` at physical bit 11 and `SPRN[9]` at physical bit 20, matching the ISA specification.
-
-**Verification:**
-- Bad: `0x7D8903A6` = `mtspr 288, r12` (Xenon SPR)
-- Good: `0x7D804BA6` = `mtspr 9, r12` = `mtctr r12` (standard)
+The `PPC_SET_SPR` macro (`(spr & 0x3FF) << 11`) is **not usable** for `mtspr`/`mfspr` — it places the full 10-bit SPR at bits 20-11 (LSB0), but `mtspr` uses a **split encoding**: bits 25-21 = SPR[4:0], bits 20-16 = SPR[9:5], bits 15-11 = RS. See the next bug entry for the actual fix.
 
 ### Bug: FAILSAFE_REC_NO_VM not set (FIXED)
 
@@ -139,7 +135,7 @@ The `PPC_SET_SPR` macro itself (`(spr & 0x3FF) << 11`) is **correct** for standa
 
 **Fix:** Set `availableRegsDefault[2]=0` and `availableRegsDefault[13]=0` in `Register-Cache.c`. Only r24-r31 available for MIPS GPR mapping.
 
-### Bug: D-cache/I-cache coherency (FIXED — REVERTED FOR PPC970)
+### Bug: D-cache/I-cache coherency (FIXED — REVERTED AND EXTENDED FOR PPC970)
 
 **Symptom:** First compiled block hangs before any dyna_mem call. No debug output after `dyna_run` entry.
 
@@ -147,7 +143,9 @@ The `PPC_SET_SPR` macro itself (`(spr & 0x3FF) << 11`) is **correct** for standa
 
 **Original fix (for Xenon):** Changed `dcbf` → `dcbst` — correct on Xenon where `dcbf` is a hint, but WRONG on PPC970 where `dcbf` works and `dcbst` breaks icbi.
 
-**PPC970 fix:** Changed `dcbst` → `dcbf`. Also added `sync` before `isync` in ICInvalidateRange (kept). `Recomp-Cache.c:18`.
+**First PPC970 fix:** Changed `dcbst` → `dcbf`. Also added `sync` before `isync` in ICInvalidateRange (kept). `Recomp-Cache.c:18`.
+
+**Second PPC970 fix (Jun 14):** Changed separate `dcbf` loop + `icbi` loop to a **combined interleaved loop** (`dcbf` + `icbi` per cache line). The hardware prefetcher can speculatively reload D-cache lines between two separate loops, re-validating the D-cache after `dcbf` but before `icbi`. This re-validation causes `icbi` to skip I-cache invalidation per the erratum. The interleaved approach eliminates the speculation gap. `Recomp-Cache.c:13-30`.
 
 ### Bug: `get_physical_addr()` returned data instead of address (FIXED)
 
@@ -235,7 +233,7 @@ With optimization ≥ `-O1`, GCC's register allocator reuses r14-r23 (declared d
 | Xenon SPR encoding (CTR=288, LR=256) | `PowerPC.h` | 394, 401, 842, 849 | FIXED |
 | FAILSAFE_REC_NO_VM not set | `ppc_dynarec.c` | 488 | FIXED |
 | r2/r13 register corruption | `Register-Cache.c` | 13-17 | FIXED |
-| D/I-cache coherency (dcbst vs dcbf) | `Recomp-Cache.c` | 13-29 | FIXED |
+| D/I-cache coherency (dcbst vs dcbf + combined loop) | `Recomp-Cache.c` | 13-30 | FIXED |
 | `get_physical_addr()` data vs address | `ppc_dynarec.c` | 533-544 | FIXED |
 | `genJumpPad()` LR not restored | `Recompile.c` | 173-174 | FIXED |
 | `lwz` for LR restore on PPC64 | `MIPS-to-PPC.c` | 1095, 1912 | FIXED |
@@ -275,12 +273,14 @@ With optimization ≥ `-O1`, GCC's register allocator reuses r14-r23 (declared d
 | SPR macros (MTCTR, MFCTR, MTLR, MFLR) wrong split encoding — SPR field overlapped register field | `PowerPC.h` | 394, 401, 842, 849 | FIXED |
 | GEN_ISYNC opcode wrong: used PPC_OPCODE_X (31) instead of PPC_OPCODE_XL (19) — emitted stwcx. r0,r0,r0 instead of isync | `PowerPC.h` | 389 | FIXED |
 | GEN_MFCTR/GEN_MFLR: RT and SPR[4:0] fields swapped — mfctr read from SPR 22 instead of SPR 9, mflr read from SPR 21 instead of SPR 8 | `PowerPC.h` | 411-417, 881-887 | FIXED |
+| D/I-cache separate-loop gap (PPC970 prefetcher re-validates D-cache between dcbf and icbi) | `Recomp-Cache.c` | 13-30 | FIXED — combined interleaved loop |
+| genCallDynaMem/ genCheckFP bypass (store args + BLR return instead of bctrl) | `MIPS-to-PPC.c`, `ppc_dynarec.c` | genCallDynaMem, genCheckFP, 361-386 | ACTIVE |
 
 ### Known issues
 
 1. **Floating-point control** — `fesetround()` / `mtfsf` / `mffs` path needs runtime verification that rounding mode is set correctly for N64 FE_TOWARDZERO emulation.
 2. **No VMX128 in the CPU dynarec** — The recompiler emits only scalar PPC (add, lwz, stw, rlwinm, etc.). LVX/STVX/VOR macros are standard AltiVec and work on both G4/G5 and Xenon.
-3. **bctrl never reaches function body (Jun 10)** — ROOT CAUSE FOUND: three macro bugs in PowerPC.h. See "X-form shift/ALU source/dest swapped", "SPR macros wrong split encoding", and "GEN_ISYNC opcode wrong (PPC_OPCODE_X vs XL)" above. Recompiled block now emits correct instructions. Waiting for rebuild/test to confirm bctrl reaches function body.
+3. **bctrl never reaches function body (Jun 14)** — Three PowerPC.h macro bugs fixed Jun 13 (X-form swap, SPR split encoding, GEN_ISYNC opcode). After rebuild, bctrl still never returns from mmap'd code buffer. **Approach changed**: genCallDynaMem/genCheckFP now bypass bctrl entirely, storing args to canary slots + BLR return to C dispatcher. See "Current focus" for details.
 4. **GEN_RLDICR/GEN_RLDICL bits 28-29 missing** — These macros emitted unknown instructions on PPC970 by leaving bits 28-29 at 00 instead of 11/10. Fixed Jun 10. EMIT_SLDI (used by sldi+or approach) was affected, but ld-from-canary approach bypasses it entirely.
 
 ### Bug: Asm clobber list uses `%fr14` instead of `fr14` (FIXED)
@@ -321,28 +321,30 @@ Concrete example: `_flushRegister()` in `Register-Cache.c:26` calls `EMIT_SRAWI(
 
 **Symptom:** `mtctr r12` was emitted as `mtspr 288, r12` — a Xenon-specific SPR (SPRN=288) instead of the standard CTR (SPRN=9). On PPC970, `mtspr 288` is either illegal or writes to an implementation-specific register, leaving CTR uninitialized (containing garbage from a previous function call). When `bctrl` later read CTR via the branch unit, it jumped to garbage, crashing or hanging.
 
-**Root cause:** `PPC_SET_SPR(instr, spr)` puts the full 10-bit SPR number at bits 11-20: `instr |= (spr & 0x3FF) << 11`. But `mtspr`/`mfspr` use a **split encoding** per the ISA:
-- Bits 6-10: SPR[4:0] (low 5 bits of SPR number)
-- Bits 11-15: SPR[9:5] (high 5 bits of SPR number)
-- Bits 16-20: RS (for `mtspr`) or RT (for `mfspr`)
+**Root cause:** `PPC_SET_SPR(instr, spr)` puts the full 10-bit SPR number at bits 20-11 (LSB0): `instr |= (spr & 0x3FF) << 11`. But `mtspr`/`mfspr` use a **split encoding** per the ISA (LSB0 numbering):
+- Bits 25-21 (<<21): SPR[4:0] (low 5 bits of SPR number)
+- Bits 20-16 (<<16): SPR[9:5] (high 5 bits of SPR number)
+- Bits 15-11 (<<11): RS (for `mtspr`) or RT (for `mfspr`)
 
-With `spr=9` (CTR), `PPC_SET_SPR` placed bits 0-9 at positions 11-20:
-- Bits 11-15 = 0b00000 (should be SPR[9:5] = 0b00000) — correct by coincidence
-- Bits 16-20 = 0b01001 (should be RS field = 0b01100 for r12) — **corrupted**, changing r12→r13
-- Bits 6-10 = 0b00000 (should be SPR[4:0] = 0b01001) — **missing**, SPR[4:0]=0
+With `spr=9` (CTR), `PPC_SET_SPR` placed 9 at bits 20-11:
+- Bits 20-16 = 0b00000 (SPR[9:5]) — correct by coincidence (9>>5=0)
+- Bits 15-11 = 0b01001 (RS field!) — **WRONG**, should be r12, gets SPR[4:0]=9 instead
 
-This encoded SPR=0b0000000000=0 → `mtspr 0, r13` (move to spr0, a different register), but GDB disassembled it as `mtspr 288, r12` due to the bits-16-20 overlap presenting as SPR[9:5]=01001 at bits 6-10. The actual encoding was garbled beyond recognition.
+And the RS field at <<21 (from `PPC_SET_RD` in the original code):
+- Bits 25-21 = 0b01100=12 (SPR[4:0] field!) — **WRONG**, should be r12 in RS, gets RS=12 in SPR[4:0]
 
-For `spr=8` (LR), the same corruption occurred: `mflr` emitted as `mfspr 256, r13` instead of `mflr r12`.
+This encoded SPR=(0<<5)|12=12 → `mtspr 12, r9` (writes r9 to SPR 12) instead of `mtctr r12`.
 
-**Fix:** Replaced `PPC_SET_SPR(ppc, spr)` with manual split encoding for each of the four macros:
+For **mfspr**, the field layout is the same but RT replaces RS. The original `GEN_MFCTR`/`GEN_MFLR` used `PPC_SET_RD` (<<21) for RT — also **wrong** for the same reason.
+
+**Fix:** Replaced `PPC_SET_SPR(ppc, spr)` + `PPC_SET_RD` with manual split encoding for each of the four macros (LSB0):
 ```
-ppc |= ((spr) & 0x1F) << 21;       // SPR[4:0] at bits 6-10
-ppc |= (((spr) >> 5) & 0x1F) << 16; // SPR[9:5] at bits 11-15
-ppc |= PPC_SET_RB(ppc, reg);       // RS/RT at bits 16-20 (via PPC_SET_RB convenience)
+ppc |= ((spr) & 0x1F) << 21;       // SPR[4:0] at bits 25-21
+ppc |= (((spr) >> 5) & 0x1F) << 16; // SPR[9:5] at bits 20-16
+PPC_SET_RB(ppc, reg);              // RS/RT at bits 15-11
 ```
 
-`PowerPC.h:394,401,842,849`. Also note that `PPC_SET_RB` is used for the register field because `PPC_SET_RD` (bits 6-10) and `PPC_SET_RA` (bits 11-15) would interfere with the split SPR encoding's position.
+`PowerPC.h:394,401,842,849`. Example: for `mtctr r12`, the manual split produces `0x7D2063A6` — correct per ISA: SPR[4:0]=9 at <<21, SPR[9:5]=0 at <<16, RS=12 at <<11.
 
 ---
 
@@ -519,25 +521,43 @@ Changed `$(warning ...)` to `$(info ...)` with "supported by RMG" for PPC blocks
 
 ## Current focus
 
-**Primary: PPC64 dynarec debugging** — ROOT CAUSE FOUND for ALL crashes to date. Three macro bugs in `PowerPC.h`, each independently sufficient to crash:
+**Primary: PPC64 dynarec debugging** — After the Jun 13 PowerPC.h macro fixes, three bugs remained:
 
-1. **X-form source/destination swap** in 10 shift/ALU macros. `EMIT_SRAWI(0, rLO, 31)` emitted `srawi rLO, r0, 31` instead of `srawi r0, rLO, 31` — sign-extending garbage into the register value, eventually causing a deferred DSI at `isync`.
+### Bug: `bctrl` never returns from mmap'd code buffer (PENDING — BYPASS APPROACH)
 
-2. **SPR split encoding wrong** in `GEN_MTCTR`/`GEN_MFCTR`/`GEN_MTLR`/`GEN_MFLR`. `PPC_SET_SPR` placed the full 10-bit SPR at the wrong position, corrupting both the SPR number and the register field. CTR was never set — `bctrl` jumped to garbage.
+**Symptom:** `dyna_run()` calls compiled code via `bctrl` but never returns — compiled code executes and reaches BLR but `bctrl` target never gets control (canary[0] shows dyna_run entered but canary[3] shows dyna_mem never reached).
 
-3. **`GEN_ISYNC` opcode wrong**: used `PPC_OPCODE_X` (= 31, X-form) but `isync` requires `PPC_OPCODE_XL` (= 19, XL-form). `PPC_FUNC_ISYNC = 150` equals `PPC_FUNC_STWCX = 150`, so the emitted instruction `7C00012C` decoded as **`stwcx. r0, r0, r0`** — a store-word-conditional to address 0 → DSI → SIGSEGV. This crashed at code buffer offset 0x50 (instruction [20]), **before** `mfctr` at [21] and **before** `bctrl` at [26]. This single bug caused ALL previous "bctrl never reaches function body" and "canary[15]=0 (CTR readback)" symptoms.
+**Root cause:** PPC970 ABI requires `bctrl` to be called with a valid TOC (r2). The compiled code buffer is mmap'd with PROT_EXEC but has no associated TOC. When `bctrl` returns from compiled code, it cannot restore the caller's TOC in LR+20. The `bl`-target function (like `dyna_mem()`) could also crash if it tries to access globals via TOC.
 
-**Fixes applied (Jun 13):**
-- Swapped `PPC_SET_RD` ↔ `PPC_SET_RA` in all 10 X-form macros. `PowerPC.h:447-530`.
-- Replaced `PPC_SET_SPR` with manual split encoding in SPR macros. `PowerPC.h:394,401,842,849`.
-- `GEN_ISYNC`: changed `PPC_OPCODE_X` → `PPC_OPCODE_XL`. `PowerPC.h:389`.
-- `GEN_MFCTR`/`GEN_MFLR`: swapped RT field and SPR[4:0] field (were reversed for `mfspr`). `PowerPC.h:411-417,881-887`.
+**Fix (bypass approach, Jun 14):** Instead of using `emit_64bit_call()` + `bctrl` for C function calls from recompiled code, `genCallDynaMem()` and `genCheckFP()` now:
+1. Compute the function address and arguments
+2. Store them in a `pending_args` array in `dyna_canary[40..46]`
+3. Emit `ld r0, 20(r1); mtlr r0; blr` to return to the C dispatcher
+4. After `dyna_run()` returns, the `dynarec()` loop checks `dyna_canary[46]` and dispatches the deferred C call (dyna_mem, dyna_check_cop1_unusable) from C context
+5. Updates the NEXT MIPS PC from the call result and continues the loop
 
-**Next:** Rebuild and test. With all four fixes:
-- Sign-extension in `_flushRegister` is now correct → no garbage register values → no deferred DSI
-- `mtctr r12` now correctly writes CTR (SPR 9, not 288) → `bctrl` jumps to the right address
-- `isync` is now correctly encoded (opcode 19, not 31) → no spurious `stwcx.` to address 0 → no crash at offset 0x50, execution reaches `bctrl` at [26]
-- `mfctr`/`mflr` now read the correct SPR (9/8) instead of the wrong SPR (22/11) → CTR/LR value is correctly read back
+### Bug: SIGILL at `mtlr r0` in compiled block (PENDING — D/I-cache coherency)
+
+**Symptom:** First test of the bypass approach: SIGILL at instruction [22] (offset 0x58) in the compiled block. RECOMP dump shows `0x7D0003A6` = `mtlr r0` — a valid PPC instruction.
+
+**Analysis:** The SPR split encoding macros are CORRECT after the Jun 13 fix. `0x7D0003A6` is the proper encoding for `mtlr r0` (SPR[4:0]=8 at <<21, SPR[9:5]=0 at <<16, RS=0 at <<11). The SIGILL is caused by **stale I-cache** — the CPU is executing garbage at the address where `mtlr r0` was written.
+
+**Root cause:** `DCFlushRange()` and `ICInvalidateRange()` in `Recomp-Cache.c` call `dcbf` and `icbi` in **separate loops**. On PPC970, the hardware prefetcher can speculatively reload D-cache lines between the two loops, re-validating the D-cache line. Per the PPC970 erratum, `icbi` does NOT invalidate I-cache if the D-cache line is still valid (even if clean). Result: I-cache has stale data at those addresses → SIGILL.
+
+**Fix (Jun 14):** Merged both functions into a single `FlushCacheRange()` that interleaves `dcbf` + `icbi` per cache line, with no gap for speculation. `DCFlushRange()` and `ICInvalidateRange()` now both call this combined function. `Recomp-Cache.c:13-30`.
+
+### Fixes applied this session (Jun 14):
+
+1. **`Recomp-Cache.c:13-30`** — Created `FlushCacheRange()` combining `dcbf` + `icbi` per cache line with trailing `sync` + `isync`. Both `DCFlushRange()` and `ICInvalidateRange()` now call this function.
+
+2. **`MIPS-to-PPC.c:genCallDynaMem()`** — Replaced `emit_64bit_call()` + `bctrl` with wrapper that stores args to `dyna_canary[40..45]` + `ld r0,20(r1)`/`mtlr r0`/`blr` to return to dispatcher.
+
+3. **`MIPS-to-PPC.c:genCheckFP()`** — Same bypass approach for COP1 unusable check.
+
+4. **`ppc_dynarec.c:361-386`** — Added pending call dispatcher after `dyna_run()` returns: reads `canary[40..46]`, calls the appropriate C function (dyna_mem or dyna_check_cop1_unusable), updates the MIPS PC from the result, continues loop.
+
+### Next step:
+Rebuild and test. With the combined `dcbf`+`icbi` fix, the I-cache should have correct data and the compiled block should execute without SIGILL. If successful, the bypass approach handles C function calls correctly and the dynarec can proceed to test more complex MIPS instruction sequences.
 
 **Secondary: mupen64plus-video-rice** — SM64 rendering (pure interpreter already works).
 **GLideN64** — deferred in favor of rice (OpenGL 2.0 compatibility on G5).
@@ -612,6 +632,9 @@ These symptoms are consistent with `GSetImg` reading all zero fields (because `w
 | `[34:35]` | Pre-stored at runtime before `dyna_run()` | 64-bit addr | Address of `dyna_check_cop1_unusable` (loaded via `ld` by emit_64bit_call) |
 | `[36:37]` | Pre-stored at runtime before `dyna_run()` | 64-bit addr | Address of `dyna_test` (loaded via `ld` by emit_64bit_call) |
 | `[38:39]` | Pre-stored at runtime before `dyna_run()` | 64-bit addr | Address of `dyna_mem` (loaded via `ld` by emit_64bit_call) |
+| `[40:44]` | `genCallDynaMem`/`genCheckFP` bypass wrapper | varied | Pending call args (vaddr, word, memType/tgt, next_pc, byteLen) |
+| `[45]` | `genCallDynaMem`/`genCheckFP` bypass wrapper | `1` (dyna_mem) or `2` (cop1) | Pending call target function selector |
+| `[46]` | C dispatcher after `dyna_run()` returns | `0` | Pending call dispatched — cleared by C after servicing |
 
 ### Critical slot conflict (FIXED)
 
@@ -653,9 +676,18 @@ key file `ppc_dynarec.c:271-302` alarm + canary diagnostic wrapping dyna_run().
 2. **`EMIT_ISYNC` macro added to `Recompile.h`** — wraps `GEN_ISYNC` like other `EMIT_*` macros.
 3. **`isync` inserted between `mtctr` and `mfctr` in `emit_64bit_call()`** (`MIPS-to-PPC.c:81-83`). Forces context synchronization so PPC970 SPR rename is committed before mfctr reads back CTR.
 
-**Verified:** `mtctr r12` encoding `0x7D804BA6` is correct for standard PPC970 (not Xenon). Bit-level verification of PPC_SET_SPR macro confirmed SPR split encoding places SPR[4:0]=01001 at bits 16-20 and SPR[9:5]=00000 at bits 11-15, giving SPR=9.
-
 **Theory:** If canary[15] still reads 0 after isync, the issue is NOT a rename stall but rather stale I-cache at the mtctr instruction position (dcbf+icbi not reaching that line). If canary[15] reads the correct value, SPR rename was indeed the problem — but bctrl might still fail since `mtctr` + `bctrl` without isync is also subject to the same rename issue.
+
+### Jun 14 session
+
+**Changes made:**
+1. **genCallDynaMem bypass** (`MIPS-to-PPC.c`) — Replaced `emit_64bit_call()` + `bctrl` with wrapper that stores args to `canary[40..45]`, emits `ld r0,20(r1)` + `mtlr r0` + `blr` to return to C dispatcher.
+2. **genCheckFP bypass** (`MIPS-to-PPC.c`) — Same pattern for COP1 unusable check.
+3. **Pending call dispatcher** (`ppc_dynarec.c:361-386`) — After `dyna_run()` returns, checks `canary[46]` and dispatches deferred C call (dyna_mem or dyna_check_cop1_unusable) from C context. Updates MIPS PC from result.
+4. **D/I-cache combined loop** (`Recomp-Cache.c:13-30`) — Merged separate `dcbf` loop + `icbi` loop into single interleaved `FlushCacheRange()` to prevent PPC970 prefetcher from re-validating D-cache between loops (erratum: `icbi` skips invalidation if D-cache line is valid).
+5. **Updated canary[] slots** — Added pending-call slots [40..46] to the table and debug prints.
+
+**Test result:** SIGILL at instruction [22] (offset 0x58) — RECOMP dump shows `0x7D0003A6` = `mtlr r0`. This is a valid instruction (SPR split encoding verified correct). SIGILL confirmed as stale I-cache from separate-loop coherency bug (fixed by #4 above). Next compile/test cycle will verify.
 
 ## Future: generic PPC dynarec architecture
 

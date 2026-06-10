@@ -10,23 +10,32 @@
 #include "Wrappers.h"
 #include "Recomp-Cache.h"
 
-void DCFlushRange(void* startaddr, unsigned int len)
+/* Combined D-cache flush + I-cache invalidate for each cache line.
+ * PPC970 erratum: icbi does NOT invalidate I-cache if the D-cache line
+ * is still valid (even if clean). The hardware prefetcher can speculatively
+ * reload D-cache lines between a dcbf loop and a separate icbi loop.
+ * Fix: interleave dcbf+icbi per cache line so icbi always sees an invalid
+ * D-cache line. */
+static void FlushCacheRange(void* startaddr, unsigned int len)
 {
     unsigned long start = (unsigned long)startaddr & ~31UL;
     unsigned long end = (unsigned long)startaddr + len;
-    for (; start < end; start += 32)
+    for (; start < end; start += 32) {
         __asm__ __volatile__("dcbf 0,%0" :: "r"(start) : "memory");
+        __asm__ __volatile__("icbi 0,%0" :: "r"(start) : "memory");
+    }
     __asm__ __volatile__("sync" ::: "memory");
+    __asm__ __volatile__("isync" ::: "memory");
+}
+
+void DCFlushRange(void* startaddr, unsigned int len)
+{
+    FlushCacheRange(startaddr, len);
 }
 
 void ICInvalidateRange(void* startaddr, unsigned int len)
 {
-    unsigned long start = (unsigned long)startaddr & ~31UL;
-    unsigned long end = (unsigned long)startaddr + len;
-    for (; start < end; start += 32)
-        __asm__ __volatile__("icbi 0,%0" :: "r"(start) : "memory");
-    __asm__ __volatile__("sync" ::: "memory");
-    __asm__ __volatile__("isync" ::: "memory");
+    FlushCacheRange(startaddr, len);
 }
 
 static void* recompmeta_buf = NULL;
