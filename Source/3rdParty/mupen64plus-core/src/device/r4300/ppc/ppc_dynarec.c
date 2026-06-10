@@ -887,6 +887,7 @@ static void write_rmg_word(uint32_t vaddr, uint32_t val, uint32_t mask) {
 unsigned int dyna_test(unsigned int value, unsigned int addr,
                        memType type, unsigned int pc, int isDelaySlot){
     (void)value; (void)addr; (void)type; (void)pc; (void)isDelaySlot;
+    dyna_canary[9] = 0xFE;  /* confirm function body is entered */
     return 1;
 }
 

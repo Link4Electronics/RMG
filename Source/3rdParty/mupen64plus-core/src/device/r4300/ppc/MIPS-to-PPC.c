@@ -1988,13 +1988,13 @@ void genCallDynaMem(memType type, int base, short immed){
     EMIT_ORI(6, 6, get_src_pc()+4);
     EMIT_LI(7, isDelaySlot ? 1 : 0);
     if (mem_call_seq == 1) {
-        /* First memory access: call dyna_test (trivial function, returns 1).
-         * Tests whether bctrl reaches a C function at all.
-         * Returns non-zero → BNELR fires → block exits to dispatcher.
-         * This avoids garbage-data corruption from skipped memory access. */
-        emit_64bit_call((uintptr_t)(&dyna_test));
-        EMIT_LI(0, 0xDD);
-        EMIT_STW(0, 44, 31);      /* canary[11] = 0xDD (bctrl returned) */
+        /* First memory access: DIAGNOSTIC — inline PPC sequence instead of
+         * calling dyna_test via bctrl. Sets r3=1 (return value) directly.
+         * If this works but calling dyna_test via bctrl hangs, the problem
+         * is C ABI (TOC, stack unwind, signal handling) not the bctrl itself. */
+        EMIT_LI(0, 0xFE);
+        EMIT_STW(0, 36, 31);      /* canary[9] = 0xFE (inline call reached) */
+        EMIT_LI(3, 1);            /* r3 = 1 (mock return value) */
     } else {
         emit_64bit_call((uintptr_t)(&dyna_mem));
     }
