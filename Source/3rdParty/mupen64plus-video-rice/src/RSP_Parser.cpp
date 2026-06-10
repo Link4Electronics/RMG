@@ -881,30 +881,34 @@ void DLParser_Process(OSTask * pTask)
     CRender::g_pRender->SetViewport(0, 0, windowSetting.uViWidth, windowSetting.uViHeight, 0x3FF);
     CRender::g_pRender->SetFillMode(options.bWinFrameMode? RICE_FILLMODE_WINFRAME : RICE_FILLMODE_SOLID);
 
+    fprintf(stderr, "RICE: DLParser_Process gDlistCount=%d data_ptr=0x%08X ucode=0x%08X GR=0x%08X\n",
+        status.gDlistCount, (uint32)pTask->t.data_ptr, (uint32)pTask->t.ucode,
+        (uint32)g_GraphicsInfo.DPC_START_REG);
+    {
+        uint32 dpc_start = *(g_GraphicsInfo.DPC_START_REG);
+        uint32 dpc_end   = *(g_GraphicsInfo.DPC_END_REG);
+        fprintf(stderr, "RICE: START DPC_START=0x%08X DPC_END=0x%08X\n",
+            dpc_start, dpc_end);
+        if (dpc_start < dpc_end)
+        {
+            fprintf(stderr, "RICE: START DP buffer non-empty, processing\n");
+            uint32 dpc_pc = dpc_start;
+            while (dpc_pc < dpc_end)
+            {
+                Gfx *pgfx = (Gfx*)&g_pRDRAMu32[(dpc_pc>>2)];
+                dpc_pc += 8;
+                uint8 op = pgfx->words.w0 >> 24;
+                if (op == 0xFD)
+                    fprintf(stderr, "RICE:   START DP BUF G_SETTIMG w0=0x%08X w1=0x%08X\n",
+                        pgfx->words.w0, pgfx->words.w1);
+                currentUcodeMap[op](pgfx);
+            }
+            fflush(stderr);
+        }
+    }
+
     try
     {
-        // Process any pending RDP commands from the DP command buffer.
-        // Workaround: ProcessRDPList is never called by the core on PPC64 BE
-        // with the pure interpreter, so G_SETTIMG (opcode 0xFD) sent by SM64
-        // via the DP buffer would never be dispatched otherwise.
-        {
-            uint32 dpc_start = *(g_GraphicsInfo.DPC_START_REG);
-            uint32 dpc_end   = *(g_GraphicsInfo.DPC_END_REG);
-            if (dpc_start < dpc_end)
-            {
-                fprintf(stderr, "RICE: DP buffer processed start=0x%08X end=0x%08X\n",
-                    dpc_start, dpc_end);
-                uint32 dpc_pc = dpc_start;
-                while (dpc_pc < dpc_end)
-                {
-                    Gfx *pgfx = (Gfx*)&g_pRDRAMu32[(dpc_pc>>2)];
-                    dpc_pc += 8;
-                    currentUcodeMap[pgfx->words.w0 >> 24](pgfx);
-                }
-                fflush(stderr);
-            }
-        }
-
         // The main loop
         while( gDlistStackPointer >= 0 )
         {
@@ -948,6 +952,67 @@ void DLParser_Process(OSTask * pTask)
     }
 
     CRender::g_pRender->EndRendering();
+
+    // Check DPC registers again after display list processing (RSP may have run)
+    {
+        uint32 dpc_start = *(g_GraphicsInfo.DPC_START_REG);
+        uint32 dpc_end   = *(g_GraphicsInfo.DPC_END_REG);
+        fprintf(stderr, "RICE: END DPC_START=0x%08X DPC_END=0x%08X\n",
+            dpc_start, dpc_end);
+        if (dpc_start < dpc_end)
+        {
+            fprintf(stderr, "RICE: END DP buffer non-empty, processing\n");
+            uint32 dpc_pc = dpc_start;
+            while (dpc_pc < dpc_end)
+            {
+                Gfx *pgfx = (Gfx*)&g_pRDRAMu32[(dpc_pc>>2)];
+                dpc_pc += 8;
+                uint8 op = pgfx->words.w0 >> 24;
+                if (op == 0xFD)
+                    fprintf(stderr, "RICE:   END DP BUF G_SETTIMG w0=0x%08X w1=0x%08X\n",
+                        pgfx->words.w0, pgfx->words.w1);
+                else if (op == 0xFE || op == 0xFF || op == 0xF6 || op == 0xF5 || op == 0xF4)
+                    fprintf(stderr, "RICE:   END DP BUF op=%02X w0=0x%08X w1=0x%08X\n",
+                        op, pgfx->words.w0, pgfx->words.w1);
+                currentUcodeMap[op](pgfx);
+            }
+            fflush(stderr);
+        }
+    }
+
+    // Dump first 512 display list commands and scan for G_SETTIMG (0xFD)
+    {
+        Gfx *pgfx0 = (Gfx*)&g_pRDRAMu32[((uint32)pTask->t.data_ptr>>2)];
+        bool foundSetTImg = false;
+        for (int i = 0; i < 512; i++) {
+            uint8 op = pgfx0[i].words.w0 >> 24;
+            if (op == 0xFD) {
+                fprintf(stderr, "RICE: FOUND G_SETTIMG at DL[%d] pc=0x%08X w0=0x%08X w1=0x%08X\n",
+                    i, (uint32)pTask->t.data_ptr + i*8,
+                    pgfx0[i].words.w0, pgfx0[i].words.w1);
+                foundSetTImg = true;
+            }
+        }
+        if (!foundSetTImg) {
+            fprintf(stderr, "RICE: NO G_SETTIMG in first 512 DL entries\n");
+        }
+        // Print first 8 entries for diagnosis
+        for (int i = 0; i < 8; i++) {
+            fprintf(stderr, "RICE:   DL[%d] pc=0x%08X w0=0x%08X w1=0x%08X op=%02X\n",
+                i, (uint32)pTask->t.data_ptr + i*8,
+                pgfx0[i].words.w0, pgfx0[i].words.w1, pgfx0[i].words.w0 >> 24);
+        }
+        // Print entries around opcode 0xFD range (0xF0-0xFF)
+        for (int i = 0; i < 512; i++) {
+            uint8 op = pgfx0[i].words.w0 >> 24;
+            if (op >= 0xF0 && op <= 0xFF) {
+                fprintf(stderr, "RICE:   RDP[%d] pc=0x%08X w0=0x%08X w1=0x%08X op=%02X\n",
+                    i, (uint32)pTask->t.data_ptr + i*8,
+                    pgfx0[i].words.w0, pgfx0[i].words.w1, op);
+            }
+        }
+        fflush(stderr);
+    }
 
     if( gRSP.ucode >= 17)
         TriggerDPInterrupt();
