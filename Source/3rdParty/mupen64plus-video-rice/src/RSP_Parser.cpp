@@ -881,9 +881,8 @@ void DLParser_Process(OSTask * pTask)
     CRender::g_pRender->SetViewport(0, 0, windowSetting.uViWidth, windowSetting.uViHeight, 0x3FF);
     CRender::g_pRender->SetFillMode(options.bWinFrameMode? RICE_FILLMODE_WINFRAME : RICE_FILLMODE_SOLID);
 
-    fprintf(stderr, "RICE: DLParser_Process gDlistCount=%d data_ptr=0x%08X ucode=0x%08X GR=0x%08X\n",
-        status.gDlistCount, (uint32)pTask->t.data_ptr, (uint32)pTask->t.ucode,
-        (uint32)g_GraphicsInfo.DPC_START_REG);
+    fprintf(stderr, "RICE: DLParser_Process gDlistCount=%d data_ptr=0x%08X ucode=0x%08X\n",
+        status.gDlistCount, (uint32)pTask->t.data_ptr, (uint32)pTask->t.ucode);
     {
         uint32 dpc_start = *(g_GraphicsInfo.DPC_START_REG);
         uint32 dpc_end   = *(g_GraphicsInfo.DPC_END_REG);
