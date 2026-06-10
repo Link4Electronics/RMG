@@ -274,6 +274,7 @@ With optimization ≥ `-O1`, GCC's register allocator reuses r14-r23 (declared d
 | X-form shift/ALU source/dest swapped (SRAWI, SLW, SRW, SRAW, AND, NAND, ANDC, NOR, OR, XOR) | `PowerPC.h` | 447-530 | FIXED |
 | SPR macros (MTCTR, MFCTR, MTLR, MFLR) wrong split encoding — SPR field overlapped register field | `PowerPC.h` | 394, 401, 842, 849 | FIXED |
 | GEN_ISYNC opcode wrong: used PPC_OPCODE_X (31) instead of PPC_OPCODE_XL (19) — emitted stwcx. r0,r0,r0 instead of isync | `PowerPC.h` | 389 | FIXED |
+| GEN_MFCTR/GEN_MFLR: RT and SPR[4:0] fields swapped — mfctr read from SPR 22 instead of SPR 9, mflr read from SPR 21 instead of SPR 8 | `PowerPC.h` | 411-417, 881-887 | FIXED |
 
 ### Known issues
 
@@ -530,11 +531,13 @@ Changed `$(warning ...)` to `$(info ...)` with "supported by RMG" for PPC blocks
 - Swapped `PPC_SET_RD` ↔ `PPC_SET_RA` in all 10 X-form macros. `PowerPC.h:447-530`.
 - Replaced `PPC_SET_SPR` with manual split encoding in SPR macros. `PowerPC.h:394,401,842,849`.
 - `GEN_ISYNC`: changed `PPC_OPCODE_X` → `PPC_OPCODE_XL`. `PowerPC.h:389`.
+- `GEN_MFCTR`/`GEN_MFLR`: swapped RT field and SPR[4:0] field (were reversed for `mfspr`). `PowerPC.h:411-417,881-887`.
 
-**Next:** Rebuild and test. With all three fixes:
+**Next:** Rebuild and test. With all four fixes:
 - Sign-extension in `_flushRegister` is now correct → no garbage register values → no deferred DSI
 - `mtctr r12` now correctly writes CTR (SPR 9, not 288) → `bctrl` jumps to the right address
 - `isync` is now correctly encoded (opcode 19, not 31) → no spurious `stwcx.` to address 0 → no crash at offset 0x50, execution reaches `bctrl` at [26]
+- `mfctr`/`mflr` now read the correct SPR (9/8) instead of the wrong SPR (22/11) → CTR/LR value is correctly read back
 
 **Secondary: mupen64plus-video-rice** — SM64 rendering (pure interpreter already works).
 **GLideN64** — deferred in favor of rice (OpenGL 2.0 compatibility on G5).

@@ -412,9 +412,9 @@ typedef unsigned int PowerPC_instr;
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_MFSPR); \
-      ppc |= (9 & 0x1F) << 21; \
+      PPC_SET_RD(ppc, (rd)); \
       ppc |= ((9 >> 5) & 0x1F) << 16; \
-      PPC_SET_RB(ppc, (rd)); }
+      ppc |= (9 & 0x1F) << 11; }
 
 #define GEN_ADDIS(ppc,rd,ra,immed) \
     { ppc = NEW_PPC_INSTR(); \
@@ -882,9 +882,9 @@ typedef unsigned int PowerPC_instr;
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_MFSPR); \
-      ppc |= (8 & 0x1F) << 21; \
+      PPC_SET_RD(ppc, (rd)); \
       ppc |= ((8 >> 5) & 0x1F) << 16; \
-      PPC_SET_RB(ppc, (rd)); }
+      ppc |= (8 & 0x1F) << 11; }
 
 #define GEN_MTCR(ppc,rs) \
     { ppc = NEW_PPC_INSTR(); \
