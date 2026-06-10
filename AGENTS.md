@@ -260,7 +260,6 @@ With optimization ≥ `-O1`, GCC's register allocator reuses r14-r23 (declared d
 | dyna_canary 8-byte alignment for ld | `ppc_dynarec.c` | 49 | FIXED |
 | Asm clobber list: `%fr14`→`fr14` (GCC silently ignored) | `ppc_dynarec.c` | 178 | FIXED |
 | Asm clobber list: missing r0 (used by trampoline) | `ppc_dynarec.c` | 173-178 | FIXED |
-| Asm clobber list: missing volatile regs r3-r7, cr1, fr0-fr13 | `ppc_dynarec.c` | 173-178 | FIXED |
 | dyna_mem canary slot 1 conflicts with emit_64bit_call stw | `ppc_dynarec.c` | 878 | FIXED — moved to slot 9 (C-code-only) |
 
 ### Known issues
@@ -275,7 +274,7 @@ With optimization ≥ `-O1`, GCC's register allocator reuses r14-r23 (declared d
 
 **Root cause:** GCC inline asm clobber names are bare register names (`"fr14"`), not `%`-prefixed operand references (`"%fr14"`). The `%` prefix is only valid in asm template strings for operand substitution. In clobber lists it's treated as an unknown register and silently ignored.
 
-**Fix:** Changed all 14 `"%frNN"` to `"frNN"`. Also added missing volatile regs r0, r3-r7, cr1, fr0-fr13. `ppc_dynarec.c:173-178`.
+**Fix:** Changed all 14 `"%frNN"` to `"frNN"`. Also added missing r0 (used by trampoline for `li`/`stw`). `ppc_dynarec.c:173-178`. Note: did NOT add r3-r7/cr1/fr0-fr13 — those are volatile-by-ABI and GCC handles them implicitly, and including them would starve GCC of registers for asm operands.
 
 ### Bug: dyna_mem canary slot 1 conflicts with emit_64bit_call stw (FIXED)
 
