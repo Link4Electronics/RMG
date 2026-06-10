@@ -396,19 +396,25 @@ typedef unsigned int PowerPC_instr;
       PPC_SET_AA    (ppc, (aa)); \
       PPC_SET_LK    (ppc, (lk)); }
 
+/* mtspr 9, rs  =  mtctr rs
+ * Standard PPC split SPR encoding: SPR[4:0] at bits 6-10 (<<21),
+ * SPR[9:5] at bits 11-15 (<<16), RS at bits 16-20 (<<11). */
 #define GEN_MTCTR(ppc,rs) \
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_MTSPR); \
-      PPC_SET_RD    (ppc, (rs)); \
-      PPC_SET_SPR   (ppc, 9); }
+      ppc |= (9 & 0x1F) << 21; \
+      ppc |= ((9 >> 5) & 0x1F) << 16; \
+      PPC_SET_RB(ppc, (rs)); }
 
+/* mfspr rd, 9  =  mfctr rd */
 #define GEN_MFCTR(ppc,rd) \
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_MFSPR); \
-      PPC_SET_RD    (ppc, (rd)); \
-      PPC_SET_SPR   (ppc, 9); }
+      ppc |= (9 & 0x1F) << 21; \
+      ppc |= ((9 >> 5) & 0x1F) << 16; \
+      PPC_SET_RB(ppc, (rd)); }
 
 #define GEN_ADDIS(ppc,rd,ra,immed) \
     { ppc = NEW_PPC_INSTR(); \
@@ -653,36 +659,38 @@ typedef unsigned int PowerPC_instr;
 #define GEN_SLD(ppc,ra,rs,sh) \
     GEN_RLDICR(ppc,ra,rs,sh,0,0)
 
+/* X-form shifts: PPC_SET_RD=bits6-10=RS(source), PPC_SET_RA=bits11-15=RA(dest).
+ * Callers follow 'add' convention: rd=dest, ra=src, so swap the macro body. */
 #define GEN_SRAWI(ppc,rd,ra,sh) \
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_SRAWI); \
-      PPC_SET_RD    (ppc, (rd)); \
-      PPC_SET_RA    (ppc, (ra)); \
+      PPC_SET_RA    (ppc, (rd)); \
+      PPC_SET_RD    (ppc, (ra)); \
       PPC_SET_SH    (ppc, (sh)); }
 
 #define GEN_SLW(ppc,rd,ra,rb) \
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_SLW); \
-      PPC_SET_RA    (ppc, (ra)); \
-      PPC_SET_RD    (ppc, (rd)); \
+      PPC_SET_RA    (ppc, (rd)); \
+      PPC_SET_RD    (ppc, (ra)); \
       PPC_SET_RB    (ppc, (rb)); }
 
 #define GEN_SRW(ppc,rd,ra,rb) \
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_SRW); \
-      PPC_SET_RA    (ppc, (ra)); \
-      PPC_SET_RD    (ppc, (rd)); \
+      PPC_SET_RA    (ppc, (rd)); \
+      PPC_SET_RD    (ppc, (ra)); \
       PPC_SET_RB    (ppc, (rb)); }
 
 #define GEN_SRAW(ppc,rd,ra,rb) \
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_SRAW); \
-      PPC_SET_RA    (ppc, (ra)); \
-      PPC_SET_RD    (ppc, (rd)); \
+      PPC_SET_RA    (ppc, (rd)); \
+      PPC_SET_RD    (ppc, (ra)); \
       PPC_SET_RB    (ppc, (rb)); }
 
 #define GEN_ANDI(ppc,rd,ra,immed) \
@@ -805,52 +813,54 @@ typedef unsigned int PowerPC_instr;
 #define GEN_SUB(ppc,rd,ra,rb) \
     GEN_SUBF(ppc,rd,rb,ra)
 
+/* X-form ALU: PPC_SET_RD=bits6-10=RS(source1), PPC_SET_RA=bits11-15=RA(dest).
+ * Callers follow 'add' convention (rd=dest, ra/srb=sources), so swap. */
 #define GEN_AND(ppc,rd,ra,rb) \
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_AND); \
-      PPC_SET_RD    (ppc, (rd)); \
-      PPC_SET_RA    (ppc, (ra)); \
+      PPC_SET_RA    (ppc, (rd)); \
+      PPC_SET_RD    (ppc, (ra)); \
       PPC_SET_RB    (ppc, (rb)); }
 
 #define GEN_NAND(ppc,rd,ra,rb) \
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_NAND); \
-      PPC_SET_RD    (ppc, (rd)); \
-      PPC_SET_RA    (ppc, (ra)); \
+      PPC_SET_RA    (ppc, (rd)); \
+      PPC_SET_RD    (ppc, (ra)); \
       PPC_SET_RB    (ppc, (rb)); }
 
 #define GEN_ANDC(ppc,rd,ra,rb) \
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_ANDC); \
-      PPC_SET_RD    (ppc, (rd)); \
-      PPC_SET_RA    (ppc, (ra)); \
+      PPC_SET_RA    (ppc, (rd)); \
+      PPC_SET_RD    (ppc, (ra)); \
       PPC_SET_RB    (ppc, (rb)); }
 
 #define GEN_NOR(ppc,rd,ra,rb) \
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_NOR); \
-      PPC_SET_RD    (ppc, (rd)); \
-      PPC_SET_RA    (ppc, (ra)); \
+      PPC_SET_RA    (ppc, (rd)); \
+      PPC_SET_RD    (ppc, (ra)); \
       PPC_SET_RB    (ppc, (rb)); }
 
 #define GEN_OR(ppc,rd,ra,rb) \
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_OR); \
-      PPC_SET_RD    (ppc, (rd)); \
-      PPC_SET_RA    (ppc, (ra)); \
+      PPC_SET_RA    (ppc, (rd)); \
+      PPC_SET_RD    (ppc, (ra)); \
       PPC_SET_RB    (ppc, (rb)); }
 
 #define GEN_XOR(ppc,rd,ra,rb) \
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_XOR); \
-      PPC_SET_RD    (ppc, (rd)); \
-      PPC_SET_RA    (ppc, (ra)); \
+      PPC_SET_RA    (ppc, (rd)); \
+      PPC_SET_RD    (ppc, (ra)); \
       PPC_SET_RB    (ppc, (rb)); }
 
 #define GEN_BLR(ppc,lk) \
@@ -864,15 +874,17 @@ typedef unsigned int PowerPC_instr;
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_MTSPR); \
-      PPC_SET_RD    (ppc, (rs)); \
-      PPC_SET_SPR   (ppc, 8); }
+      ppc |= (8 & 0x1F) << 21; \
+      ppc |= ((8 >> 5) & 0x1F) << 16; \
+      PPC_SET_RB(ppc, (rs)); }
 
 #define GEN_MFLR(ppc,rd) \
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_MFSPR); \
-      PPC_SET_RD    (ppc, (rd)); \
-      PPC_SET_SPR   (ppc, 8); }
+      ppc |= (8 & 0x1F) << 21; \
+      ppc |= ((8 >> 5) & 0x1F) << 16; \
+      PPC_SET_RB(ppc, (rd)); }
 
 #define GEN_MTCR(ppc,rs) \
     { ppc = NEW_PPC_INSTR(); \
