@@ -1021,15 +1021,13 @@ void DLParser_Process(OSTask * pTask)
         for (int i = 0; i < 512; i++) {
             uint8 op = pgfx0[i].words.w0 >> 24;
             if (op < 0xF0) {
-                const char *name = (gRSP.ucode!=5&&gRSP.ucode!=10 && op < 256) ?
-                    ucodeNames_GBI1[op] : ucodeNames_GBI2[op];
                 if (op == 0x06 || op == 0xB8 || op == 0xBB || op == 0xBC ||
                     op == 0xBD || op == 0xBE || op == 0xBF ||
                     op == 0xB0 || op == 0xB1 || op == 0x01 ||
                     op == 0x03 || op == 0x04) {
-                    fprintf(stderr, "RICE:   GBI1[%d] pc=0x%08X w0=0x%08X w1=0x%08X op=%02X (%s)\n",
+                    fprintf(stderr, "RICE:   GBI1[%d] pc=0x%08X w0=0x%08X w1=0x%08X op=%02X\n",
                         i, (uint32)pTask->t.data_ptr + i*8,
-                        pgfx0[i].words.w0, pgfx0[i].words.w1, op, name);
+                        pgfx0[i].words.w0, pgfx0[i].words.w1, op);
                     nonRdpFound = true;
                 }
             }
