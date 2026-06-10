@@ -54,17 +54,18 @@ static void emit_64bit_call(uintptr_t target) {
     EMIT_RLWINM(12, 12, 0, 0, 31);
     EMIT_STW(12, 5 * 4, 31);   /* canary[5] = r12 after RLWINM */
     EMIT_ORI(12, 12, w0);
-    EMIT_STW(12, 15 * 4, 31);  /* canary[15] = r12 after low32 construction */
+    EMIT_STW(12, 2 * 4, 31);  /* canary[2] = r12 after low32 construction (no overlap) */
 
     EMIT_LIS(11, w3);
     EMIT_RLWINM(11, 11, 0, 0, 31);
     EMIT_ORI(11, 11, w2);
-    GEN_RLDICR(tmp, 11, 11, 32, 31, 0);  /* sldi r11, r11, 32 */
+    EMIT_STW(11, 7 * 4, 31);  /* canary[7] = r11 BEFORE rldicl (input value to verify) */
+    GEN_RLDICL(tmp, 11, 11, 32, 0, 0);  /* rldicl r11, r11, 32, 0 = rotldi by 32 (upper 32 were zeroed by RLWINM so this = shift) */
     set_next_dst(tmp);
-    EMIT_STW(11, 14 * 4, 31);  /* canary[14] = r11 after sldi (high32 part) */
+    EMIT_STW(11, 14 * 4, 31);  /* canary[14] = r11 after rldicl (high32 part) */
 
     EMIT_OR(12, 12, 11);
-    EMIT_STW(12, 15 * 4, 31);  /* canary[15] = r12 after OR (overwrites previous) */
+    EMIT_STW(12, 15 * 4, 31);  /* canary[15] = r12 after OR (only written once, no overlap) */
     EMIT_STW(12, 6 * 4, 31);   /* canary[6] = r12 after OR (duplicate, not overwritten) */
     EMIT_LI(0, 0xBB);
     EMIT_STW(0, 12 * 4, 31);  /* canary[12] = 0xBB (flag we reached OR) */
