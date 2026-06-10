@@ -51,13 +51,13 @@ static void emit_64bit_call(uintptr_t target) {
 
     EMIT_LIS(12, w1);
     EMIT_STW(12, 4 * 4, 31);   /* canary[4] = r12 after LIS */
-    EMIT_RLDICL(12, 12, 0, 32);
-    EMIT_STW(12, 5 * 4, 31);   /* canary[5] = r12 after RLDICL */
+    EMIT_RLWINM(12, 12, 0, 0, 31);
+    EMIT_STW(12, 5 * 4, 31);   /* canary[5] = r12 after RLWINM */
     EMIT_ORI(12, 12, w0);
     EMIT_STW(12, 15 * 4, 31);  /* canary[15] = r12 after low32 construction */
 
     EMIT_LIS(11, w3);
-    EMIT_RLDICL(11, 11, 0, 32);
+    EMIT_RLWINM(11, 11, 0, 0, 31);
     EMIT_ORI(11, 11, w2);
     GEN_RLDICR(tmp, 11, 11, 32, 31, 0);  /* sldi r11, r11, 32 */
     set_next_dst(tmp);
