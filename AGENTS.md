@@ -505,6 +505,15 @@ Since the CANARY line is only printed AFTER `dyna_run()` returns (it hangs befor
 5. **Alarm around `dyna_run()`** — `alarm(5)` before, `alarm(0)` + `signal(SIGALRM, SIG_DFL)` after
 
 When the first `dyna_run()` hangs, after 5 seconds the handler fires and shows where it stuck.
+[12]=0xCC
+[10]=0xCC
+[11]=0xDD
+[3]=1
+[4]=1
+[10]=0x00 + [12]=0xCC hang before first memory access
+
+key file ppc_dynarec.c:271-302 alarm + canary diagnostic wrapping dyna_run().
+
 
 ### Reading the CANARY line
 ```
