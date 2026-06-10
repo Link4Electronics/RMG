@@ -279,8 +279,8 @@ void dynarec(unsigned int address){
 
         if (dbg_iter <= 50) {
             long dist = (long)((uintptr_t)&dyna_mem - (uintptr_t)code);
-            fprintf(stderr, "[PPC_DYN] calling dyna_run func=0x%p code=0x%p dyna_mem=0x%p dist=%ldKB (%srange)\n",
-                    (void*)func, (void*)code, (void*)&dyna_mem, dist/1024,
+            fprintf(stderr, "[PPC_DYN] calling dyna_run func=0x%p code=0x%p dyna_mem=0x%p dyna_test=0x%lx dist=%ldKB (%srange)\n",
+                    (void*)func, (void*)code, (void*)&dyna_mem, (unsigned long)(uintptr_t)&dyna_test, dist/1024,
                     (dist < 0x2000000LL && dist > -0x2000000LL) ? "IN" : "OUT");
 
             fprintf(stderr, "[PPC_DYN] PRE-RUN CANARY: "
