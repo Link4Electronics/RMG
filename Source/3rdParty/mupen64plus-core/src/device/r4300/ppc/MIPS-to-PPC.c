@@ -52,17 +52,22 @@ static void emit_64bit_call(uintptr_t target) {
     EMIT_LIS(12, w1);
     EMIT_RLDICL(12, 12, 0, 32);
     EMIT_ORI(12, 12, w0);
+    EMIT_STW(12, 15 * 4, 31);  /* canary[15] = r12 after low32 construction */
+
     EMIT_LIS(11, w3);
     EMIT_RLDICL(11, 11, 0, 32);
     EMIT_ORI(11, 11, w2);
     GEN_RLDICR(tmp, 11, 11, 32, 31, 0);  /* sldi r11, r11, 32 */
     set_next_dst(tmp);
-    EMIT_OR(12, 12, 11);
+    EMIT_STW(11, 14 * 4, 31);  /* canary[14] = r11 after sldi (high32 part) */
 
-    EMIT_STW(11, 12 * 4, 31);  /* canary[12] = high32(target) */
-    EMIT_STW(12, 13 * 4, 31);  /* canary[13] = low32(target)  */
+    EMIT_OR(12, 12, 11);
+    EMIT_STW(12, 15 * 4, 31);  /* canary[15] = r12 after OR (overwrites previous) */
+    EMIT_LI(0, 0xBB);
+    EMIT_STW(0, 12 * 4, 31);  /* canary[12] = 0xBB (flag we reached OR) */
 
     EMIT_MTCTR(12);
+    EMIT_STW(12, 13 * 4, 31);  /* canary[13] = r12 right before bctrl */
     EMIT_BCTRL(0);
 }
 
@@ -1961,7 +1966,7 @@ void genCallDynaMem(memType type, int base, short immed){
         EMIT_STW(0, 40, 31);      /* canary[10] = 0xCC (1st call, before dyna_mem) */
     } else {
         EMIT_LI(0, 0xEE);
-        EMIT_STW(0, 52, 31);      /* canary[13] = 0xEE (subseq call, before dyna_mem) */
+        EMIT_STW(0, 44, 31);      /* canary[11] = 0xEE (subseq call, before dyna_mem) */
     }
     mem_call_seq++;
 
