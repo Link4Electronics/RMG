@@ -156,6 +156,7 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
                 test_result, dyna_canary[24]);
     }
 
+    dyna_canary[8] = 0;     /* clear direct C call artifact; bctrl enters dyna_test → 0xFE */
     dyna_canary[9] = 0xAA;  /* trampoline: before asm */
     __asm__ volatile(
         "stdu   1, -32(1) \n"
