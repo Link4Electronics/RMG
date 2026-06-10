@@ -38,35 +38,49 @@ static int genCallDynaMemVM(int rs_reg, int rt_reg, memType type, int immed);
 /* 64-bit-safe call: loads full address and uses bctrl to reach any distance */
 static void emit_64bit_call(uintptr_t target) {
     /*
-     * Load full 64-bit address via embedded data + PC-relative load.
+     * Load full 64-bit address via embedded data + two lwz loads.
+     *
+     * IMPORTANT: Cannot use 'ld r12, 0(r12)' because the .quad data
+     * starts at offset 0x3C from the code buffer (60 = 8*7+4) which is
+     * NOT 8-byte aligned. On PPC970, 'ld' requires 8-byte alignment;
+     * a misaligned ld triggers an alignment exception → SIGSEGV.
+     * Using two 'lwz' is safe (only 4-byte alignment, guaranteed by
+     * word-based code emission) and combining them with rldicr + or.
      *
      * Sequence:
-     *   bl   .+8        -- skip 2 instruction words (8 bytes), set LR = PC+4
-     *   .quad target    -- 8 bytes of embedded data (2 instruction slots)
-     *   mflr r12        -- r12 = address of .quad (PC+4 at the bl site)
-     *   ld   r12, 0(r12) -- r12 = (uint64_t)target
+     *   bl   .+12       -- skip 2 data words (12 bytes), set LR = PC+4
+     *   .word high32    -- 4 bytes: high 32 bits of target address
+     *   .word low32     -- 4 bytes: low 32 bits of target address
+     *   mflr r12        -- r12 = address of .word high32
+     *   lwz  r11, 0(r12) -- r11 = high 32 bits
+     *   lwz  r12, 4(r12) -- r12 = low 32 bits
+     *   sldi r11, r11, 32 -- r11 <<= 32
+     *   or   r12, r12, r11 -- r12 = (high32 << 32) | low32
      *   mtctr r12
      *   bctrl
      *
-     * Total: 1 branch + 2 data words + 4 instructions = 7 slots = 28 bytes
-     * Uses only r12. Works for any 64-bit address. No address-construction
-     * arithmetic to go wrong.
+     * Total: 1 branch + 2 data words + 8 instructions = 11 slots = 44 bytes.
+     * Uses r12 and r11 (both reserved by register allocator; never maps
+     * a MIPS GPR to either).
      */
     uint64_t t = (uint64_t)target;
 
-    /* bl .+12: branch forward 3 instructions (12 bytes), set LR = PC+4
-     * The 3 instruction slots are: bl itself + 2 data words for .quad.
-     * After bl executes, LR = addr of .quad data, and execution resumes
-     * at the mflr instruction right after the .quad. */
+    /* bl .+12: branch forward 3 instruction slots (12 bytes), set LR = PC+4
+     * LR = address of first data word (.word high32) after bl completes. */
     EMIT_B(3, 0, 1);
 
-    /* Embedded 64-bit address data (2 instruction words) */
+    /* Embedded 64-bit address data as two 32-bit words */
     set_next_dst((PowerPC_instr)(t >> 32));  /* high 32 bits */
     set_next_dst((PowerPC_instr)(t & 0xFFFFFFFFULL));  /* low 32 bits */
 
-    /* Load the address from embedded data, then call via CTR */
-    EMIT_MFLR(12);        /* r12 = address of embedded data */
-    EMIT_LD(12, 0, 12);   /* r12 = *(uint64_t*)r12 = target address */
+    /* Load the two halves and assemble the full 64-bit address */
+    EMIT_MFLR(12);            /* r12 = addr of .word high32 */
+    EMIT_LWZ(11, 0, 12);      /* r11 = high 32 bits at r12+0 */
+    EMIT_LWZ(12, 4, 12);      /* r12 = low 32 bits at r12+4 */
+    PowerPC_instr tmp;
+    GEN_RLDICR(tmp, 11, 11, 32, 31, 0);  /* sldi r11, r11, 32 */
+    set_next_dst(tmp);
+    EMIT_OR(12, 12, 11);      /* r12 = full 64-bit address */
     EMIT_MTCTR(12);
     EMIT_BCTRL(0);
 }
