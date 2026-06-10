@@ -279,8 +279,11 @@ PowerPC_func* recompile_block(PowerPC_block* ppc_block, unsigned int addr)
         int word_count = func->code_length;
         fprintf(stderr, "[RECOMP] final code at %p: %d words\n", func->code, word_count);
         int wi;
-        for (wi = 0; wi < word_count; wi++)
+        int show = word_count < 30 ? word_count : 20;
+        for (wi = 0; wi < show; wi++)
             fprintf(stderr, "[RECOMP]   [%3d] %08X\n", wi, code32[wi]);
+        if (word_count > 30)
+            fprintf(stderr, "[RECOMP]   ... (%d more words)\n", word_count - 20);
     }
 
     return func;
