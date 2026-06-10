@@ -35,52 +35,33 @@ static void genCheckFP(void);
 void genCallDynaMem(memType type, int base, short immed);
 static int genCallDynaMemVM(int rs_reg, int rt_reg, memType type, int immed);
 
-/* 64-bit-safe call: loads full address and uses bctrl to reach any distance */
+/* 64-bit-safe call: loads full target address and uses bctrl.
+ *
+ * Constructs 64-bit target from 4x16-bit immediates (lis/rldicl/ori) and
+ * combines them. Avoids bl/mflr/LR trickery, embedded data, and alignment
+ * issues. Stores final address to canary[12/13] via r31 for debugging.
+ */
 static void emit_64bit_call(uintptr_t target) {
-    /*
-     * Load full 64-bit address via embedded data + two lwz loads.
-     *
-     * IMPORTANT: Cannot use 'ld r12, 0(r12)' because the .quad data
-     * starts at offset 0x3C from the code buffer (60 = 8*7+4) which is
-     * NOT 8-byte aligned. On PPC970, 'ld' requires 8-byte alignment;
-     * a misaligned ld triggers an alignment exception → SIGSEGV.
-     * Using two 'lwz' is safe (only 4-byte alignment, guaranteed by
-     * word-based code emission) and combining them with rldicr + or.
-     *
-     * Sequence:
-     *   bl   .+12       -- skip 2 data words (12 bytes), set LR = PC+4
-     *   .word high32    -- 4 bytes: high 32 bits of target address
-     *   .word low32     -- 4 bytes: low 32 bits of target address
-     *   mflr r12        -- r12 = address of .word high32
-     *   lwz  r11, 0(r12) -- r11 = high 32 bits
-     *   lwz  r12, 4(r12) -- r12 = low 32 bits
-     *   sldi r11, r11, 32 -- r11 <<= 32
-     *   or   r12, r12, r11 -- r12 = (high32 << 32) | low32
-     *   mtctr r12
-     *   bctrl
-     *
-     * Total: 1 branch + 2 data words + 8 instructions = 11 slots = 44 bytes.
-     * Uses r12 and r11 (both reserved by register allocator; never maps
-     * a MIPS GPR to either).
-     */
     uint64_t t = (uint64_t)target;
-
-    /* bl .+12: branch forward 3 instruction slots (12 bytes), set LR = PC+4
-     * LR = address of first data word (.word high32) after bl completes. */
-    EMIT_B(3, 0, 1);
-
-    /* Embedded 64-bit address data as two 32-bit words */
-    set_next_dst((PowerPC_instr)(t >> 32));  /* high 32 bits */
-    set_next_dst((PowerPC_instr)(t & 0xFFFFFFFFULL));  /* low 32 bits */
-
-    /* Load the two halves and assemble the full 64-bit address */
-    EMIT_MFLR(12);            /* r12 = addr of .word high32 */
-    EMIT_LWZ(11, 0, 12);      /* r11 = high 32 bits at r12+0 */
-    EMIT_LWZ(12, 4, 12);      /* r12 = low 32 bits at r12+4 */
+    uint16_t w0 =  t        & 0xFFFF;
+    uint16_t w1 = (t >> 16) & 0xFFFF;
+    uint16_t w2 = (t >> 32) & 0xFFFF;
+    uint16_t w3 = (t >> 48) & 0xFFFF;
     PowerPC_instr tmp;
+
+    EMIT_LIS(12, w1);
+    EMIT_RLDICL(12, 12, 0, 32);
+    EMIT_ORI(12, 12, w0);
+    EMIT_LIS(11, w3);
+    EMIT_RLDICL(11, 11, 0, 32);
+    EMIT_ORI(11, 11, w2);
     GEN_RLDICR(tmp, 11, 11, 32, 31, 0);  /* sldi r11, r11, 32 */
     set_next_dst(tmp);
-    EMIT_OR(12, 12, 11);      /* r12 = full 64-bit address */
+    EMIT_OR(12, 12, 11);
+
+    EMIT_STW(11, 12 * 4, 31);  /* canary[12] = high32(target) */
+    EMIT_STW(12, 13 * 4, 31);  /* canary[13] = low32(target)  */
+
     EMIT_MTCTR(12);
     EMIT_BCTRL(0);
 }
