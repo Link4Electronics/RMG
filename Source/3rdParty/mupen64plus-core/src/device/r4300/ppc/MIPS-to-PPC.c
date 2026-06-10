@@ -64,7 +64,7 @@ static void emit_64bit_call(uintptr_t target) {
      * sldi r11, r11, 32 shifts high32 to upper half, or combines with low32.
      * No memory ops = no alignment/cache/coherency issues. */
     EMIT_SLDI(11, 11, 32);     /* r11 = r11 << 32 (high32 shifts to upper half) */
-    EMIT_OR(12, 11, 12);       /* r12 = r11 | r12 = full 64-bit address */
+    EMIT_OR(11, 12, 12);       /* r12 = r11 | r12 = full 64-bit address */
     EMIT_STW(12, 14 * 4, 31);  /* canary[14] = r12 low32 after combine */
     EMIT_STW(11, 15 * 4, 31);  /* canary[15] = r11 low32 after shift (0x00000000) */
     EMIT_STW(12, 6 * 4, 31);   /* canary[6] = r12 low32 after combine (duplicate) */
