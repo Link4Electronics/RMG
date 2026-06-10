@@ -276,8 +276,11 @@ PowerPC_func* recompile_block(PowerPC_block* ppc_block, unsigned int addr)
 
     {
         unsigned int* code32 = (unsigned int*)func->code;
-        fprintf(stderr, "[RECOMP] final code at %p: first 4 instrs = %08X %08X %08X %08X\n",
-                func->code, code32[0], code32[1], code32[2], code32[3]);
+        int word_count = func->code_length < 20 ? func->code_length : 20;
+        fprintf(stderr, "[RECOMP] final code at %p: %d words\n", func->code, word_count);
+        int wi;
+        for (wi = 0; wi < word_count; wi++)
+            fprintf(stderr, "[RECOMP]   [%3d] %08X\n", wi, code32[wi]);
     }
 
     return func;
