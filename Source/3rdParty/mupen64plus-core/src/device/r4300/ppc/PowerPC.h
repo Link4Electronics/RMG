@@ -617,6 +617,7 @@ typedef unsigned int PowerPC_instr;
     GEN_RLWINM(ppc,rd,ra,(sh),0,31-(sh))
 
 /* PPC64: rotate left doubleword immediate then clear right */
+/* MD-form: bits 28-29 = 11 for RLDICR */
 #define GEN_RLDICR(ppc,ra,rs,sh,me,rc) \
     { ppc = NEW_PPC_INSTR(); \
       ppc |= (30 << 26); \
@@ -627,8 +628,11 @@ typedef unsigned int PowerPC_instr;
       ppc |= ((me) & 0x1F) << 5; \
       ppc |= (1 << 4); \
       ppc |= (((sh) >> 5) & 1) << 1; \
+      ppc |= (3 << 2); \
       ppc |= ((rc) & 1); }
 
+/* PPC64: rotate left doubleword immediate then clear left */
+/* MD-form: bits 28-29 = 10 for RLDICL */
 #define GEN_RLDICL(ppc,ra,rs,sh,mb,rc) \
     { ppc = NEW_PPC_INSTR(); \
       ppc |= (30 << 26); \
@@ -638,6 +642,7 @@ typedef unsigned int PowerPC_instr;
       ppc |= (((mb) >> 5) & 1) << 10; \
       ppc |= ((mb) & 0x1F) << 5; \
       ppc |= (((sh) >> 5) & 1) << 1; \
+      ppc |= (2 << 2); \
       ppc |= ((rc) & 1); }
 
 #define GEN_SLD(ppc,ra,rs,sh) \

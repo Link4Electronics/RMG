@@ -37,42 +37,47 @@ static int genCallDynaMemVM(int rs_reg, int rt_reg, memType type, int immed);
 
 /* 64-bit-safe call: loads full target address and uses bctrl.
  *
- * Constructs 64-bit target from 4x16-bit immediates (lis/rldicl/ori) and
- * combines them. Avoids bl/mflr/LR trickery, embedded data, and alignment
- * issues. Stores final address to canary[12/13] via r31 for debugging.
+ * Uses ld-from-canary for known functions (dyna_test, dyna_mem,
+ * dyna_check_cop1_unusable) whose addresses are pre-stored at runtime
+ * before dyna_run(). For other targets, falls back to stw+ld+sync
+ * reconstruction which was verified correct on PPC970.
+ * Stores diagnostic info to canary via r31 for debugging.
  */
 static void emit_64bit_call(uintptr_t target) {
-    uint64_t t = (uint64_t)target;
-    uint16_t w0 =  t        & 0xFFFF;
-    uint16_t w1 = (t >> 16) & 0xFFFF;
-    uint16_t w2 = (t >> 32) & 0xFFFF;
-    uint16_t w3 = (t >> 48) & 0xFFFF;
+    int slot = -1;
+    if (target == (uintptr_t)(&dyna_test))               slot = 36;
+    else if (target == (uintptr_t)(&dyna_mem))            slot = 38;
+    else if (target == (uintptr_t)(&dyna_check_cop1_unusable)) slot = 34;
 
-    EMIT_LIS(12, w1);
-    EMIT_STW(12, 4 * 4, 31);   /* canary[4] = r12 after LIS */
-    EMIT_RLWINM(12, 12, 0, 0, 31);
-    EMIT_STW(12, 5 * 4, 31);   /* canary[5] = r12 after RLWINM */
-    EMIT_ORI(12, 12, w0);
-    EMIT_STW(12, 2 * 4, 31);  /* canary[2] = r12 after low32 construction */
+    if (slot >= 0) {
+        /* Load full 64-bit address directly from canary (pre-stored). */
+        EMIT_LD(12, slot * 4, 31);
+    } else {
+        /* Fallback: stw+ld+sync reconstruction for arbitrary targets.
+         * On BE: stw high32 at lower addr, low32 at upper addr, so
+         * ld reads correct BE uint64 = (high32 << 32) | low32. */
+        uint64_t t = (uint64_t)target;
+        uint16_t w0 =  t        & 0xFFFF;
+        uint16_t w1 = (t >> 16) & 0xFFFF;
+        uint16_t w2 = (t >> 32) & 0xFFFF;
+        uint16_t w3 = (t >> 48) & 0xFFFF;
 
-    EMIT_LIS(11, w3);
-    EMIT_RLWINM(11, 11, 0, 0, 31);
-    EMIT_ORI(11, 11, w2);
-    EMIT_STW(11, 7 * 4, 31);  /* canary[7] = r11 (high32) */
+        EMIT_LIS(12, w1);
+        EMIT_RLWINM(12, 12, 0, 0, 31);
+        EMIT_ORI(12, 12, w0);
+        EMIT_LIS(11, w3);
+        EMIT_RLWINM(11, 11, 0, 0, 31);
+        EMIT_ORI(11, 11, w2);
+        EMIT_STW(11, 24, 31);      /* store high32 at lower addr */
+        EMIT_STW(12, 28, 31);      /* store low32 at upper addr */
+        EMIT_SYNC();
+        EMIT_LD(12, 24, 31);       /* ld r12 = full 64-bit target address */
+    }
 
-    /* Combine high32(r11) and low32(r12) into 64-bit r12 via register ops.
-     * sldi r11, r11, 32 shifts high32 to upper half, or combines with low32.
-     * No memory ops = no alignment/cache/coherency issues. */
-    EMIT_SLDI(11, 11, 32);     /* r11 = r11 << 32 (high32 shifts to upper half) */
-    EMIT_OR(11, 12, 12);       /* r12 = r11 | r12 = full 64-bit address */
-    EMIT_STW(12, 14 * 4, 31);  /* canary[14] = r12 low32 after combine */
-    EMIT_STW(11, 15 * 4, 31);  /* canary[15] = r11 low32 after shift (0x00000000) */
-    EMIT_STW(12, 6 * 4, 31);   /* canary[6] = r12 low32 after combine (duplicate) */
     EMIT_STW(1, 30 * 4, 31);   /* canary[30] = r1 (stack pointer low32) */
     EMIT_STW(2, 31 * 4, 31);   /* canary[31] = r2 (TOC pointer low32) */
     EMIT_LI(0, 0xBB);
-    EMIT_STW(0, 12 * 4, 31);  /* canary[12] = 0xBB (flag we reached OR) */
-
+    EMIT_STW(0, 12 * 4, 31);  /* canary[12] = 0xBB before mtctr */
     EMIT_MTCTR(12);
     EMIT_STW(12, 13 * 4, 31);  /* canary[13] = r12 right before bctrl */
     EMIT_LI(0, 0xCC);

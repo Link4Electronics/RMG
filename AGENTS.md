@@ -262,15 +262,20 @@ With optimization ≥ `-O1`, GCC's register allocator reuses r14-r23 (declared d
 | Asm clobber list: missing r0 (used by trampoline) | `ppc_dynarec.c` | 173-178 | FIXED |
 | dyna_mem canary slot 1 conflicts with emit_64bit_call stw | `ppc_dynarec.c` | 878 | FIXED — moved to slot 9 (C-code-only) |
 | Over-aggressive asm clobbers (`r3-r7,cr1,fr0-fr13`) cause GCC `impossible constraints` | `ppc_dynarec.c` | 174-180 | FIXED — removed, keep only r0 and r14-r31/fr14-fr27 |
-| `emit_64bit_call` r1/r2 canary diagnostic (slots 30-33) | `MIPS-to-PPC.c` | 72-83 | ACTIVE |
-| First memory access skips C call for diagnostic (slot 36=0xBB) | `MIPS-to-PPC.c` | 1990-1999 | ACTIVE |
-| `dyna_canary` expanded 16→40 elements | `ppc_dynarec.c` | 49 | ACTIVE |
+| GEN_RLDICR bits 28-29 missing (emitted unknown instruction) | `PowerPC.h` | 619-632 | FIXED |
+| GEN_RLDICL bits 28-29 missing (emitted unknown instruction) | `PowerPC.h` | 634-646 | FIXED |
+| `emit_64bit_call` sldi+or wrong on PPC970 (switched to stw+ld+sync fallback + ld-from-canary) | `MIPS-to-PPC.c` | 38-88 | FIXED |
+| `dyna_canary` expanded 16→48 elements | `ppc_dynarec.c` | 49 | ACTIVE |
+| emit_64bit_call stw low/high order reversed on BE (fallback path) | `MIPS-to-PPC.c` | 61-74 | FIXED |
+| Direct C call test of dyna_test before asm trampoline | `ppc_dynarec.c` | 147-158 | ACTIVE |
+| Pre-store function addresses in canary for ld-from-canary approach | `ppc_dynarec.c`, `MIPS-to-PPC.c` | 317-330, 46-88 | ACTIVE |
 
 ### Known issues
 
 1. **Floating-point control** — `fesetround()` / `mtfsf` / `mffs` path needs runtime verification that rounding mode is set correctly for N64 FE_TOWARDZERO emulation.
 2. **No VMX128 in the CPU dynarec** — The recompiler emits only scalar PPC (add, lwz, stw, rlwinm, etc.). LVX/STVX/VOR macros are standard AltiVec and work on both G4/G5 and Xenon.
-3. **emit_64bit_call stw+ld+sync works** (Jun 10) — canary `[13]=0xCC079CD0` confirms correct address in r12 before bctrl. The bctrl never returns (hang in called function). Root cause unidentified: dyna_test (trivial `return 1`, no globals) also fails to execute its first C statement. r1/r2 diagnostic added (canary slots 30-33).
+3. **bctrl never reaches function body (Jun 10)** — Both stw+ld+sync and ld-from-canary approaches confirm correct r12 before bctrl. Even `dyna_test` (trivial `return 1`) fails to execute its first C statement. r1/r2 look valid (canary slots 30-31). Direct C call test added (slots 20-25) to distinguish C-context issue from compiled-code-context issue.
+4. **GEN_RLDICR/GEN_RLDICL bits 28-29 missing** — These macros emitted unknown instructions on PPC970 by leaving bits 28-29 at 00 instead of 11/10. Fixed Jun 10. EMIT_SLDI (used by sldi+or approach) was affected, but ld-from-canary approach bypasses it entirely.
 
 ### Bug: Asm clobber list uses `%fr14` instead of `fr14` (FIXED)
 
@@ -468,6 +473,8 @@ Key finding: **the problem is not dyna_mem-specific** — even `static unsigned 
 Diagnostic added: r1 stored to canary[30], r2 to canary[31] right before mtctr/bctrl in emit_64bit_call.
 Decisive test: first mem_call_seq==1 skips C call entirely (sets r3=0, continues) — canary[36]=0xBB if reached. This will distinguish between "hang in compiled code before first mem access" vs "hang in bctrl/C function call".
 
+Direct C call test: dyna_run() calls dyna_test() from C before the asm trampoline (canary[20..25]). If this succeeds (expected), the issue is not in the C environment but in the compiled-code calling context.
+
 **Secondary: mupen64plus-video-rice** — SM64 rendering (pure interpreter already works).
 **GLideN64** — deferred in favor of rice (OpenGL 2.0 compatibility on G5).
 
@@ -515,37 +522,39 @@ These symptoms are consistent with `GSetImg` reading all zero fields (because `w
 
 ### Canary slot assignments
 
+`dyna_canary[48]` at 8-byte aligned global, r31 points to it in compiled code.
+
 | Slot | Set by | Expect | Meaning |
 |------|--------|--------|---------|
 | `[0]` | `dyna_run()` C code before asm | `1` | `dyna_run` entered |
-| `[1]` | `emit_64bit_call` `stw r12, 4(r31)` | low32(r12) | Low half of combined 64-bit address (corrupted value if stw+ld sequence is broken) |
-| `[2]` | `emit_64bit_call` `stw r12, 8(r31)` | low32 | r12 after ORI (low32 of target) |
 | `[3]` | `dyna_mem()` entry | `1` | dyna_mem reached |
-| `[4]` | `emit_64bit_call` `stw r12, 16(r31)` | high16(lis) | r12 after LIS (mid16 of target) |
-| `[5]` | `emit_64bit_call` `stw r12, 20(r31)` | low16<<16 | r12 after RLWINM (zero-extended low16) |
-| `[6]` | `emit_64bit_call` `stw r12, 24(r31)` | low32 | r12 after ld combine (duplicate of [14]) |
-| `[7]` | `emit_64bit_call` `stw r11, 28(r31)` | high32 | r11 after ORI (high32 of target) |
-| `[8]` | `dyna_mem()` before any RDRAM access | `0xBE` | dyna_mem prologue alive |
-| `[9]` | Trampoline before asm (`0xAA`), dyna_mem entry (`0xDE`), trampoline after asm (`0xFF`) | varied | `0xDE` = dyna_mem entered (C-code-only slot, not touched by compiled code) |
-| `[10]` | Compiled PPC code before 1st `bctrl` | `0xCC` | 1st genCallDynaMem reached |
-| `[11]` | Compiled PPC code after 1st `bctrl` | `0xDD` | 1st dyna_mem returned (also `0xEE` on subseq call before bctrl) |
-| `[12]` | `emit_64bit_call` `li 0, 0xBB; stw 0, 48(r31)` | `0xBB` | Flag: reached mtctr step |
-| `[13]` | `emit_64bit_call` `stw r12, 52(r31)` | low32(target) | r12 right before `bctrl` — the actual CTR value |
-| `[14]` | `emit_64bit_call` `stw r12, 56(r31)` | low32 | r12 low32 after ld combine |
-| `[15]` | `emit_64bit_call` `stw r11, 60(r31)` | high32 | r11 high32 preserved after combine |
-| `[30]` | `emit_64bit_call` `stw r1, 120(r31)` | low32(r1) | r1 (stack pointer) before mtctr — checks ABI integrity |
-| `[31]` | `emit_64bit_call` `stw r2, 124(r31)` | low32(r2) | r2 (TOC pointer) before mtctr — checks ABI integrity |
+| `[8]` | `dyna_test()` body (`0xFE`), `dyna_mem()` prologue (`0xBE`) | varied | C-code-only confirm function body entered |
+| `[9]` | Trampoline before asm (`0xAA`), dyna_mem entry (`0xDE`), trampoline after asm (`0xFF`) | varied | `0xDE` = dyna_mem entered (C-code-only slot) |
+| `[10]` | `genCallDynaMem` `li 0, 0xCC; stw 0, 40(r31)` | `0xCC` | 1st memory access before bctrl |
+| `[11]` | `genCallDynaMem` `li 0, 0xEE/0xDD; stw 0, 44(r31)` | `0xDD`/`0xEE` | `0xDD` = bctrl returned (1st), `0xEE` = subseq call before bctrl |
+| `[12]` | `emit_64bit_call` `li 0, 0xBB; stw 0, 48(r31)` | `0xBB` | Reached mtctr step |
+| `[13]` | `emit_64bit_call` `stw r12, 52(r31)` | low32(target) | r12 right before `bctrl` — actual CTR value |
+| `[20]` | `dyna_test` return value (direct C call test) | `1` | low32 of return from direct C call |
+| `[21]` | `dyna_test` return value (direct C call test) | `1` | return value |
+| `[22]` | Direct C call test marker | `0xBE` | Confirmed returned from direct C call |
+| `[23]` | Direct C call test marker | `0xCA` | Before direct C call |
+| `[24]` | Direct C call test result | varied | low32 of dyna_test result (direct C call) |
+| `[25]` | Direct C call test marker | `0xBE` | Direct C call returned successfully |
+| `[30]` | `emit_64bit_call` `stw r1, 120(r31)` | low32(r1) | r1 (stack pointer) before mtctr — ABI integrity |
+| `[31]` | `emit_64bit_call` `stw r2, 124(r31)` | low32(r2) | r2 (TOC pointer) before mtctr — ABI integrity |
 | `[32]` | `emit_64bit_call` `li 0, 0xCC; stw 0, 128(r31)` | `0xCC` | Right before bctrl instruction |
 | `[33]` | `emit_64bit_call` `li 0, 0xDD; stw 0, 132(r31)` | `0xDD` | Right after bctrl returned (only set if bctrl returns) |
-| `[36]` | `genCallDynaMem` (mem_call_seq==1 skip path) `li 0, 0xBB; stw 0, 144(r31)` | `0xBB` | First memory access reached, C call skipped for diagnostic |
+| `[34:35]` | Pre-stored at runtime before `dyna_run()` | 64-bit addr | Address of `dyna_check_cop1_unusable` (loaded via `ld` by emit_64bit_call) |
+| `[36:37]` | Pre-stored at runtime before `dyna_run()` | 64-bit addr | Address of `dyna_test` (loaded via `ld` by emit_64bit_call) |
+| `[38:39]` | Pre-stored at runtime before `dyna_run()` | 64-bit addr | Address of `dyna_mem` (loaded via `ld` by emit_64bit_call) |
 
 ### Critical slot conflict (FIXED)
 
 **dyna_canary[1]** was shared between `dyna_mem()` C code setting `0xDEAD` and `emit_64bit_call` stw `r12, 4(r31)`. Since the stw runs BEFORE dyna_mem is called, canary[1] always showed the 64-bit address low half, never 0xDEAD. **Fix:** `dyna_mem()` moved its entry marker to canary[9] (C-code-only slot, not touched by compiled code).
 
 ### Files
-- `ppc_dynarec.c`: `dyna_canary[40]` global, C-code stores [0]/[5], `dyna_mem()` stores [3]/[8]/[9], trampoline loads r31 and stores [9], alarm handler prints all, print in `dynarec()` loop
-- `MIPS-to-PPC.c`: `genCallDynaMem()` emits compiled stores for [10]/[11] using `mem_call_seq` counter; `emit_64bit_call()` stores address construction intermediates to [1],[2],[4],[5],[6],[7],[12],[13],[14],[15],[30],[31],[32],[33]; diagnostic skip at [36]
+- `ppc_dynarec.c`: `dyna_canary[48]` global, C-code stores [0]/[23]/[24]/[25], `dyna_mem()` stores [3]/[8]/[9], trampoline loads r31 and stores [9], alarm handler prints all, print in `dynarec()` loop. Pre-stores function addresses at [34..39] before each `dyna_run()`.
+- `MIPS-to-PPC.c`: `emit_64bit_call()` uses `EMIT_LD` from pre-stored canary slots for known functions (dyna_test→[36], dyna_mem→[38], cop1→[34]); stw+ld+sync fallback for other targets. Emits diagnostic stores to [10]/[11]/[12]/[13]/[30]/[31]/[32]/[33].
 
 ### SIGALRM timeout + canary diagnostics (Jun 10)
 
@@ -564,46 +573,13 @@ key file `ppc_dynarec.c:271-302` alarm + canary diagnostic wrapping dyna_run().
 
 **Changes made:**
 1. **`dyna_canary` expanded 16→40** — to hold ABI diagnostic slots and decisive test markers
-2. **emit_64bit_call r1/r2 diagnostic** — stores r1 (stack pointer) to canary[30], r2 (TOC pointer) to canary[31] right before mtctr, and 0xCC/0xDD to canary[32]/[33] around bctrl
-3. **Decisive test: skip C call on first memory access** — genCallDynaMem(mem_call_seq==1) now emits `LI(0, 0xBB); STW(0, canary[36]); LI(3, 0)` instead of `emit_64bit_call()`. This tests whether the compiled block can survive without any C function call. Second access (mem_call_seq==2) calls dyna_test; subsequent calls use dyna_mem.
-
-### Reading the CANARY line
-```
-[RECOMP] final code at 0x7fffd4280000: 385 words
-...
-[PPC_DYN] TIMEOUT CANARY: [0]=1 [3]=0 [4]=0 [5]=0 [9]=0xAA [10]=0xCC [11]=0x00 [12]=0x00 [13]=0x70006FFF
-```
-- `[12]=0x00` `[13]=0x70006FFF`: emit_64bit_call stored constructed address before bctrl
-  - [12]=0x00 = stw r0=0xBB might not have run yet, or was overwritten after stw → suggests hang between STW(12) and LI(0,0xBB)
-  - [13]=0x70006FFF ≠ expected 0xCC076920 — r12 value corrupted between arithmetic and STW
-- `[10]=0xCC` + `[11]=0x00`: genCallDynaMem reached, bctrl never returned
-  - `[11]=0xDD`: dyna_mem returned
-  - `[11]=0x00`: bctrl jumped to garbage or dyna_mem crashed before canary[3]=1
-- `[3]=1` + `[4]=0`: dyna_mem entered but hung inside the switch
-- `[12]=0xCC` + `[10]=0x00`: code hung before reaching the first memory access (earlier instruction)
-- `[12]=0x00` + `[13]=0x70006FFF` + `[1]` shows low32 of address construction: this reveals whether the stw+ld+sync approach correctly reassembles the 64-bit address
-
-### Latest canary state (Jun 10, after stw+ld+sync fix)
-```
-[PPC_DYN] TIMEOUT CANARY: [0]=32767 [1]=0xCC079CD0 [9]=0xAA [10]=0xCC [11]=0x00 [12]=0xBB [13]=0xCC079CD0
-```
-- `[12]=0xBB` + `[13]=0xCC079CD0`: address construction WORKS correctly — r12 = &dyna_test (0xCC079CD0)
-  - stw+ld+sync produces correct 64-bit address (was 0x70006FFF before fix)
-  - mtctr executed, r12 with correct value stored to canary right before bctrl
-- `[10]=0xCC` + `[11]=0x00`: genCallDynaMem reached, bctrl never returned
-  - [11]=0x00 = dyna_test never returned (should be 0xDD)
-- `[9]=0xAA`: trampoline set before asm, NOT `0xFE` (dyna_test) nor `0xDE` (dyna_mem)
-  - **function C code never entered** — proves bctrl does not reach the called function
-- `[0]=32767`: probable partial overwrite from sth to canary[0]+2 (unexpected, but harmless to main diagnostic)
-
-### Decisive diagnostic (Jun 10)
-First genCallDynaMem (mem_call_seq==1) now skips the C function call entirely:
-- Emits `LI(0, 0xBB); STW(0, canary[36]); LI(3, 0)` instead of `emit_64bit_call()`
-- r3=0 means "no special handling" — block continues to next MIPS instruction
-- canary[36]=0xBB confirms the compiled code reached the first memory access point
-  - If [36]=0xBB and TIMEOUT fires: hang is somewhere AFTER the first memory access
-  - If [36]=0x00 and TIMEOUT fires: hang is BEFORE the first memory access (MIPS instruction translation)
-  - If NO TIMEOUT: block completed successfully, proving C function call is the specific problem
+2. **emit_64bit_call r1/r2 diagnostic** — stores r1 to canary[30], r2 to canary[31] right before mtctr, 0xCC/0xDD to [32]/[33] around bctrl
+3. **Decisive test: skip C call on first memory access** — genCallDynaMem(mem_call_seq==1) emits `LI(0, 0xBB); STW(0, canary[36]); LI(3, 0)` instead of emit_64bit_call()
+4. **emit_64bit_call switched to sldi+or** — replaced stw+ld+sync with register-based 64-bit construction (fails on PPC970: sldi doesn't produce correct shift — canary[15]=0x07FF0000)
+5. **GEN_RLDICR bits 28-29 FIXED** — were `00` instead of `11` (RLDICR variant), causing PPC970 to decode rldicr as unknown instruction. Also fixed GEN_RLDICL bits 28-29 → `10`.
+6. **emit_64bit_call switched to ld-from-canary** — loads 64-bit address from pre-stored canary slots via single `ld` instruction. Fallback path uses stw+ld+sync (verified correct on PPC970). Known functions (dyna_test→[36], dyna_mem→[38], cop1→[34]) use ld; others use stw+ld+sync fallback.
+7. **Direct C call test** — dyna_run() now calls dyna_test() from C code before the asm trampoline (canary slots 20-25). Distinguishes C-context issue from compiled-code-context issue.
+8. **dyna_canary expanded 40→48** — to hold pre-stored function addresses at [34..39].
 
 ## Future: generic PPC dynarec architecture
 

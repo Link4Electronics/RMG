@@ -46,7 +46,7 @@ int noCheckInterrupt = 0;
 int failsafeRec = 0;
 int llbit = 0;
 uint32_t delay_slot = 0;
-volatile uint32_t dyna_canary[40] __attribute__((aligned(8))) = {0};
+volatile uint32_t dyna_canary[48] __attribute__((aligned(8))) = {0};
 
 /* SIGALRM handler: prints canary state on timeout and exits */
 static void dyna_alarm_handler(int sig) {
@@ -57,14 +57,18 @@ static void dyna_alarm_handler(int sig) {
             "[4]=0x%08X [5]=0x%08X [6]=0x%08X [7]=0x%08X "
             "[8]=0x%02X [9]=0x%02X [10]=0x%02X [11]=0x%02X "
             "[12]=0x%02X [13]=0x%08X [14]=0x%08X [15]=0x%08X"
+            " [20]=0x%02X [21]=0x%08X [22]=0x%02X"
+            " [23]=0x%02X [24]=0x%08X [25]=0x%02X"
             " [30]=0x%08X [31]=0x%08X [32]=0x%02X [33]=0x%02X"
-            " [36]=0x%02X\n",
+            " [36]=0x%08X [37]=0x%08X [38]=0x%08X [39]=0x%08X\n",
             dyna_canary[0], dyna_canary[1], dyna_canary[2], dyna_canary[3],
             dyna_canary[4], dyna_canary[5], dyna_canary[6], dyna_canary[7],
             dyna_canary[8], dyna_canary[9], dyna_canary[10], dyna_canary[11],
             dyna_canary[12], dyna_canary[13], dyna_canary[14], dyna_canary[15],
+            dyna_canary[20], dyna_canary[21], dyna_canary[22],
+            dyna_canary[23], dyna_canary[24], dyna_canary[25],
             dyna_canary[30], dyna_canary[31], dyna_canary[32], dyna_canary[33],
-            dyna_canary[36]);
+            dyna_canary[36], dyna_canary[37], dyna_canary[38], dyna_canary[39]);
     _exit(1);
 }
 
@@ -139,6 +143,18 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
     fprintf(stderr, "[PPC_DYN] dyna_run ptrs: reg=%p cop0=%p cop1s=%p cop1d=%p fcr31=%p rdram=%p last=%p nxtint=%p func=%p code=%p\n",
             ptrs[0], ptrs[1], ptrs[2], ptrs[3], ptrs[4], ptrs[5],
             ptrs[6], ptrs[7], ptrs[8], ptrs[9]);
+
+    /* DIRECT CALL TEST from C context: call dyna_test right before asm.
+     * If this works but bctrl from compiled code doesn't, the problem is
+     * specific to the compiled code's call context (TOC/stack corruption). */
+    {
+        dyna_canary[23] = 0xCA;  /* before direct C call */
+        unsigned int test_result = dyna_test(0, 0, MEM_LW, 0, 0);
+        dyna_canary[24] = (uint32_t)test_result;
+        dyna_canary[25] = 0xBE;  /* returned successfully */
+        fprintf(stderr, "[PPC_DYN] DIRECT C CALL TEST: dyna_test returned %u, canary[24]=0x%08X\n",
+                test_result, dyna_canary[24]);
+    }
 
     dyna_canary[9] = 0xAA;  /* trampoline: before asm */
     __asm__ volatile(
@@ -298,6 +314,21 @@ void dynarec(unsigned int address){
         signal(SIGALRM, dyna_alarm_handler);
         alarm(5);
 
+        /* Pre-store function addresses in canary for emit_64bit_call ld approach.
+         * Canary is uint32_t[] and ld loads 8 bytes as BE uint64.
+         * hi32 at lower address, lo32 at higher address → ld reads correct 64-bit value. */
+        {
+            uint64_t test_addr = (uint64_t)(uintptr_t)&dyna_test;
+            uint64_t mem_addr  = (uint64_t)(uintptr_t)&dyna_mem;
+            uint64_t cop1_addr = (uint64_t)(uintptr_t)&dyna_check_cop1_unusable;
+            dyna_canary[34] = (uint32_t)(cop1_addr >> 32);
+            dyna_canary[35] = (uint32_t)(cop1_addr);
+            dyna_canary[36] = (uint32_t)(test_addr >> 32);
+            dyna_canary[37] = (uint32_t)(test_addr);
+            dyna_canary[38] = (uint32_t)(mem_addr >> 32);
+            dyna_canary[39] = (uint32_t)(mem_addr);
+        }
+
         if (last_addr == 0)
             last_addr = address - 4;
         interp_addr = address = dyna_run(func, code);
@@ -312,14 +343,18 @@ void dynarec(unsigned int address){
                     "[4]=0x%08X [5]=0x%08X [6]=0x%08X [7]=0x%08X "
                     "[8]=0x%02X [9]=0x%02X [10]=0x%02X [11]=0x%02X "
                     "[12]=0x%02X [13]=0x%08X [14]=0x%08X [15]=0x%08X"
+                    " [20]=0x%02X [21]=0x%08X [22]=0x%02X"
+                    " [23]=0x%02X [24]=0x%08X [25]=0x%02X"
                     " [30]=0x%08X [31]=0x%08X [32]=0x%02X [33]=0x%02X"
-                    " [36]=0x%02X\n",
+                    " [36]=0x%08X [37]=0x%08X [38]=0x%08X [39]=0x%08X\n",
                     dyna_canary[0], dyna_canary[1], dyna_canary[2], dyna_canary[3],
                     dyna_canary[4], dyna_canary[5], dyna_canary[6], dyna_canary[7],
                     dyna_canary[8], dyna_canary[9], dyna_canary[10], dyna_canary[11],
                     dyna_canary[12], dyna_canary[13], dyna_canary[14], dyna_canary[15],
+                    dyna_canary[20], dyna_canary[21], dyna_canary[22],
+                    dyna_canary[23], dyna_canary[24], dyna_canary[25],
                     dyna_canary[30], dyna_canary[31], dyna_canary[32], dyna_canary[33],
-                    dyna_canary[36]);
+                    dyna_canary[36], dyna_canary[37], dyna_canary[38], dyna_canary[39]);
         }
 
         if(!noCheckInterrupt){
