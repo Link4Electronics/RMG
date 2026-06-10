@@ -252,11 +252,13 @@ With optimization ≥ `-O1`, GCC's register allocator reuses r14-r23 (declared d
 | **rldicl after lis** | `PowerPC.h`, `Recompile.h` | 627-636, 165-166 | FIXED |
 | **branch() bo/nbo inversion (all six conditions)** | `MIPS-to-PPC.c` | 197-205 | **FIXED** |
 | **r23/DYNAREG_ZERO overwritten by canary trampoline** | `ppc_dynarec.c`, `MIPS-to-PPC.c`, `Register-Cache.c` | 134-136, 1974-1990, 18 | **FIXED** |
+| **Canary-based emit_64bit_call ignores target param** | `MIPS-to-PPC.c` | 54-65 | **FIXED** (reverted to arithmetic) |
 
 ### Known issues
 
 1. **Floating-point control** — `fesetround()` / `mtfsf` / `mffs` path needs runtime verification that rounding mode is set correctly for N64 FE_TOWARDZERO emulation.
 2. **No VMX128 in the CPU dynarec** — The recompiler emits only scalar PPC (add, lwz, stw, rlwinm, etc.). LVX/STVX/VOR macros are standard AltiVec and work on both G4/G5 and Xenon.
+3. **canary[13]=0x70006FFF mystery (Jun 10)** — Arithmetic-based emit_64bit_call stores correct high32(target) to canary[12]=0x00 (verified: low32 of r11=0x7FFF00000000 = 0), but low32(target) stored to canary[13] shows 0x70006FFF instead of expected 0xCC076920. Instructions [14]-[19] in RECOMP dump decode correctly. Suspect: r12 corrupted between arithmetic construction and STW, possibly by an intervening instruction not visible in the truncated dump. Need to dump ALL 385 words to verify. `MIPS-to-PPC.c:44-67`.
 
 ---
 
@@ -433,7 +435,7 @@ Changed `$(warning ...)` to `$(info ...)` with "supported by RMG" for PPC blocks
 
 ## Current focus
 
-**Primary: PPC64 dynarec debugging** — diagnosing hang in first `dyna_run()` call.
+**Primary: PPC64 dynarec debugging** — diagnosing hang in first `dyna_run()` call. Arithmetic-based `emit_64bit_call` reaches `genCallDynaMem` (canary[10]=0xCC) but bctrl never returns (canary[11]=0x00). canary[12]=0x00 matches expected low32(0x7FFF00000000)=0 for r11 after sldi, but canary[13]=0x70006FFF ≠ expected 0xCC076920 — r12 address value is corrupted between arithmetic and STW.
 **Secondary: mupen64plus-video-rice** — SM64 rendering (pure interpreter already works).
 **GLideN64** — deferred in favor of rice (OpenGL 2.0 compatibility on G5).
 
@@ -477,7 +479,7 @@ These symptoms are consistent with `GSetImg` reading all zero fields (because `w
 
 ## PPC dynarec canary debugging
 
-`volatile uint32_t dyna_canary[16]` inserted at 7 points to isolate where the OOT hang occurs. Printed in `dynarec()` loop when `dbg_iter <= 50`.
+`volatile uint32_t dyna_canary[16]` inserted at points to isolate where the OOT hang occurs. Printed by SIGALRM handler on timeout. Additionally, `emit_64bit_call` now stores the constructed target address to [12]/[13] for debugging.
 
 | Slot | Set by | Value | Meaning |
 |------|--------|-------|---------|
@@ -485,14 +487,15 @@ These symptoms are consistent with `GSetImg` reading all zero fields (because `w
 | `[3]` | `dyna_mem()` entry | `1` | dyna_mem reached |
 | `[4]` | `dyna_mem()` after switch | `1` | dyna_mem completed |
 | `[5]` | `dyna_run()` C code after asm | `1` | asm block returned |
+| `[9]` | Trampoline `stw` before `bctrl` | `0xAA` | Trampoline reached compiled code |
 | `[10]` | Compiled PPC code before 1st `bctrl` | `0xCC` | 1st genCallDynaMem reached |
 | `[11]` | Compiled PPC code after 1st `bctrl` | `0xDD` | 1st dyna_mem returned |
-| `[12]` | Trampoline `stw 0, 48(31)` before `bctrl` | `0xCC` | r31 loaded with canary ptr, trampoline OK |
-| `[13]` | Compiled PPC code before 2nd+ `bctrl` | `0xEE` | Subsequent genCallDynaMem reached |
+| `[12]` | `emit_64bit_call` via `EMIT_STW(11, 48, 31)` | high32(target) | high32 of bctrl target address |
+| `[13]` | `emit_64bit_call` via `EMIT_STW(12, 52, 31)` | low32(target) | low32 of bctrl target address |
 
 ### Files
-- `ppc_dynarec.c`: `dyna_canary[16]` global, C-code stores [0]/[5], `dyna_mem()` stores [3]/[4], trampoline `ld` of r31 and store [12], print in `dynarec()` loop
-- `MIPS-to-PPC.c`: `genCallDynaMem()` emits compiled stores for [10]/[11] (1st call) and [13] (subseq calls) using `mem_call_seq` counter
+- `ppc_dynarec.c`: `dyna_canary[16]` global, C-code stores [0]/[5], `dyna_mem()` stores [3]/[4], trampoline loads r31 and stores [9], alarm handler prints all, print in `dynarec()` loop
+- `MIPS-to-PPC.c`: `genCallDynaMem()` emits compiled stores for [10]/[11] using `mem_call_seq` counter; `emit_64bit_call()` stores constructed address to [12]/[13]
 
 ### SIGALRM timeout + canary diagnostics (Jun 10)
 
@@ -517,14 +520,18 @@ key file ppc_dynarec.c:271-302 alarm + canary diagnostic wrapping dyna_run().
 
 ### Reading the CANARY line
 ```
-CANARY [0]=1 [3]=0 [4]=0 [5]=0 [10]=0x00 [11]=0x00 [12]=0xCC
+[RECOMP] final code at 0x7fffd4280000: 385 words
+...
+[PPC_DYN] TIMEOUT CANARY: [0]=1 [3]=0 [4]=0 [5]=0 [9]=0xAA [10]=0xCC [11]=0x00 [12]=0x00 [13]=0x70006FFF
 ```
-- `[12]=0xCC` + `[0]=1` + `[5]=0`: trampoline ran, `bctrl` never returned → hang in compiled code
-  - `[10]=0xCC`: bctrl for 1st dyna_mem is about to be called but never returns
-  - `[10]=0x00`: code hung before reaching the first memory access (earlier instruction)
+- `[12]=0x00` `[13]=0x70006FFF`: emit_64bit_call stored constructed address before bctrl
+  - [12]=0x00 = low32(r11) = correct (r11 = 0x7FFF00000000 after sldi)
+  - [13]=0x70006FFF ≠ expected 0xCC076920 — r12 value corrupted between arithmetic and STW
+- `[10]=0xCC` + `[11]=0x00`: genCallDynaMem reached, bctrl never returned
+  - `[11]=0xDD`: dyna_mem returned
+  - `[11]=0x00`: bctrl jumped to garbage or dyna_mem crashed before canary[3]=1
 - `[3]=1` + `[4]=0`: dyna_mem entered but hung inside the switch
-- `[11]=0xDD` + `[5]=0`: dyna_mem returned but asm block never completed (BNELR or subsequent call hung)
-- `[13]=0xEE`: at least two memory accesses reached in compiled code
+- `[12]=0xCC` + `[10]=0x00`: code hung before reaching the first memory access (earlier instruction)
 
 ## Future: generic PPC dynarec architecture
 
