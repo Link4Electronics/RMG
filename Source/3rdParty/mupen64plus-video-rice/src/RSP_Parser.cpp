@@ -883,6 +883,28 @@ void DLParser_Process(OSTask * pTask)
 
     try
     {
+        // Process any pending RDP commands from the DP command buffer.
+        // Workaround: ProcessRDPList is never called by the core on PPC64 BE
+        // with the pure interpreter, so G_SETTIMG (opcode 0xFD) sent by SM64
+        // via the DP buffer would never be dispatched otherwise.
+        {
+            uint32 dpc_start = *(g_GraphicsInfo.DPC_START_REG);
+            uint32 dpc_end   = *(g_GraphicsInfo.DPC_END_REG);
+            if (dpc_start < dpc_end)
+            {
+                fprintf(stderr, "RICE: DP buffer processed start=0x%08X end=0x%08X\n",
+                    dpc_start, dpc_end);
+                uint32 dpc_pc = dpc_start;
+                while (dpc_pc < dpc_end)
+                {
+                    Gfx *pgfx = (Gfx*)&g_pRDRAMu32[(dpc_pc>>2)];
+                    dpc_pc += 8;
+                    currentUcodeMap[pgfx->words.w0 >> 24](pgfx);
+                }
+                fflush(stderr);
+            }
+        }
+
         // The main loop
         while( gDlistStackPointer >= 0 )
         {
@@ -909,16 +931,6 @@ void DLParser_Process(OSTask * pTask)
                 gDlistStack[gDlistStackPointer].pc, pgfx->words.w0, pgfx->words.w1, (gRSP.ucode!=5&&gRSP.ucode!=10)?ucodeNames_GBI1[(pgfx->words.w0>>24)]:ucodeNames_GBI2[(pgfx->words.w0>>24)]);
 #endif
             gDlistStack[gDlistStackPointer].pc += 8;
-            {
-                static int cmdCount = 0;
-                if (cmdCount < 500) {
-                    fprintf(stderr, "RICE: cmd[%d] pc=%08X w0=%08X w1=%08X op=%02X\n",
-                        cmdCount, gDlistStack[gDlistStackPointer].pc - 8,
-                        pgfx->words.w0, pgfx->words.w1, pgfx->words.w0 >> 24);
-                    fflush(stderr);
-                }
-                cmdCount++;
-            }
             currentUcodeMap[pgfx->words.w0 >>24](pgfx);
 
             if ( gDlistStackPointer >= 0 && --gDlistStack[gDlistStackPointer].countdown < 0 )
@@ -1690,10 +1702,6 @@ void RDP_DLParser_Process(void)
     uint32 start = *(g_GraphicsInfo.DPC_START_REG);
     uint32 end = *(g_GraphicsInfo.DPC_END_REG);
 
-    fprintf(stderr, "RICE: RDP_DLParser_Process start=0x%08X end=0x%08X gDlistCount=%d\n",
-        start, end, status.gDlistCount);
-    fflush(stderr);
-
     gDlistStackPointer=0;
     gDlistStack[gDlistStackPointer].pc = start;
     gDlistStack[gDlistStackPointer].countdown = MAX_DL_COUNT;
@@ -1724,9 +1732,6 @@ void RDP_DLParser_Process(void)
                 pgfx->words.w0, pgfx->words.w1);
         currentUcodeMap[op](pgfx);
     }
-
-    fprintf(stderr, "RICE: RDP_DLParser_Process end gDlistCount=%d\n", status.gDlistCount);
-    fflush(stderr);
 
     CRender::g_pRender->EndRendering();
 }

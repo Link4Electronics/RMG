@@ -173,8 +173,6 @@ static void UpdateScreenStep2 (void)
     //    status.gDlistCount, *g_GraphicsInfo.VI_ORIGIN_REG); fflush(stderr);
     status.bVIOriginIsUpdated = false;
 
-    fprintf(stderr, "RICE: screenUpdate=%d bScreenIsDrawn=%d gDlistCount=%d\n",
-        currentRomOptions.screenUpdateSetting, status.bScreenIsDrawn, status.gDlistCount); fflush(stderr);
 
     if( status.ToToggleFullScreen && status.gDlistCount > 0 )
     {
