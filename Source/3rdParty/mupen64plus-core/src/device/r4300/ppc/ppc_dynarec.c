@@ -118,15 +118,12 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
             ptrs[0], ptrs[1], ptrs[2], ptrs[3], ptrs[4], ptrs[5],
             ptrs[6], ptrs[7], ptrs[8], ptrs[9]);
 
+    dyna_canary[9] = 0xAA;  /* trampoline: before asm */
     __asm__ volatile(
         "stdu   1, -32(1) \n"
         "mfcr   14        \n"
         "stw    14, 8(1)  \n"
-        "li     0, 0xAA   \n"
-        "stw    0, 36(%4) \n"
         "ld     14, 0(%0) \n"
-        "li     0, 0xBB   \n"
-        "stw    0, 36(%4) \n"
         "ld     15, 8(%0) \n"
         "ld     16, 16(%0)\n"
         "ld     17, 24(%0)\n"
@@ -146,22 +143,16 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
         "mflr   4         \n"
         "addi   4, 4, 28  \n"
         "std    4, 20(1)  \n"
-        "li     0, 0xDD   \n"
-        "stw    0, 36(%4) \n"
         "sync             \n"
         "isync            \n"
-        "li     0, 0xEE   \n"
-        "stw    0, 36(%4) \n"
         "bctrl            \n"
-        "li     0, 0xFF   \n"
-        "stw    0, 36(%4) \n"
         "mr     %1, 3     \n"
         "ld     %3, 20(1) \n"
         "mflr   %2        \n"
         "ld     1, 0(1)   \n"
         : "+r" (ptrs_addr),
           "=r" (naddr), "=r" (link_branch), "=r" (return_addr)
-        : "r" (dyna_canary)
+        :
         : "cr0", "cr2",
             "4","8","9","10","11","12",
             "14","15","16","17","18","19","20","21","22","23",
@@ -169,6 +160,7 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
             "%fr14","%fr15","%fr16","%fr17","%fr18","%fr19","%fr20","%fr21","%fr22","%fr23","%fr24","%fr25","%fr26","%fr27",
             "memory");
 
+    dyna_canary[9] = 0xFF; /* trampoline: after asm returned */
     dyna_canary[5] = 1;  /* returned from asm block */
 
     last_func_val = (PowerPC_func*)((void**)ptrs)[10];
