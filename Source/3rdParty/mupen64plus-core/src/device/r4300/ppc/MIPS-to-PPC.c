@@ -1988,20 +1988,13 @@ void genCallDynaMem(memType type, int base, short immed){
     EMIT_ORI(6, 6, get_src_pc()+4);
     EMIT_LI(7, isDelaySlot ? 1 : 0);
     if (mem_call_seq == 1) {
-        /* First memory access: DIAGNOSTIC — skip C function call entirely.
-         * Just set r3=0 (no special handling) and let the block continue.
-         * This tests whether the hang is in the bctrl mechanism vs. in the
-         * compiled code before the first memory access.
-         * The MIPS load/store instruction will get garbage data, but the
-         * block itself should continue executing without a host crash. */
-        EMIT_LI(0, 0xBB);
-        EMIT_STW(0, 36 * 4, 31);  /* canary[36] = 0xBB (skipped C call) */
-        EMIT_LI(3, 0);            /* return 0 = normal, no special handling */
-    } else if (mem_call_seq == 2) {
-        /* Second memory access: call dyna_test (trivial function, returns 1) */
+        /* First memory access: call dyna_test (trivial function, returns 1).
+         * Tests whether bctrl reaches a C function at all.
+         * Returns non-zero → BNELR fires → block exits to dispatcher.
+         * This avoids garbage-data corruption from skipped memory access. */
         emit_64bit_call((uintptr_t)(&dyna_test));
         EMIT_LI(0, 0xDD);
-        EMIT_STW(0, 44, 31);      /* canary[11] = 0xDD (first real call returned) */
+        EMIT_STW(0, 44, 31);      /* canary[11] = 0xDD (bctrl returned) */
     } else {
         emit_64bit_call((uintptr_t)(&dyna_mem));
     }
