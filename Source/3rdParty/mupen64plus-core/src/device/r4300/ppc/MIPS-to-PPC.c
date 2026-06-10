@@ -38,43 +38,32 @@ static int genCallDynaMemVM(int rs_reg, int rt_reg, memType type, int immed);
 /* 64-bit-safe call: loads full address and uses bctrl to reach any distance */
 static void emit_64bit_call(uintptr_t target) {
     /*
-     * Load full 64-bit address into r12, then mtctr + bctrl.
+     * Load full 64-bit address via embedded data + PC-relative load.
      *
-     * PPC64 sequence (8 instructions, 2 registers):
-     *   lis   r12, w1       -> r12 = EXTS(w1) << 16
-     *   rldicl r12, r12, 0, 32  -> clear sign-extension upper bits
-     *   ori   r12, r12, w0  -> r12 = 0x00000000w1w0
-     *   lis   r11, w3       -> r11 = EXTS(w3) << 16
-     *   rldicl r11, r11, 0, 32  -> clear sign-extension upper bits
-     *   ori   r11, r11, w2  -> r11 = 0x00000000w3w2
-     *   sldi  r11, r11, 32  -> r11 = w3w2_00000000
-     *   or    r12, r12, r11 -> r12 = w3_w2_w1_w0
+     * Sequence:
+     *   bl   .+8        -- skip 2 instruction words (8 bytes), set LR = PC+4
+     *   .quad target    -- 8 bytes of embedded data (2 instruction slots)
+     *   mflr r12        -- r12 = address of .quad (PC+4 at the bl site)
+     *   ld   r12, 0(r12) -- r12 = (uint64_t)target
      *   mtctr r12
      *   bctrl
      *
-     * Why the rldicl after each lis?
-     *   On PPC64, 'lis' (addis rd,0,imm) sign-extends the 16-bit immediate
-     *   to 64 bits before shifting left by 16. If w1 >= 0x8000, the upper
-     *   32 bits get filled with 1s, corrupting the final address when the
-     *   target is > 4GB (shared library code). rldicl clears bits 0-31
-     *   (MSB-0), i.e. the upper 32 bits in LSB-0, restoring zero-extension.
+     * Total: 1 branch + 2 data words + 4 instructions = 7 slots = 28 bytes
+     * Uses only r12. Works for any 64-bit address. No address-construction
+     * arithmetic to go wrong.
      */
     uint64_t t = (uint64_t)target;
-    uint16_t w0 =  t        & 0xFFFF;
-    uint16_t w1 = (t >> 16) & 0xFFFF;
-    uint16_t w2 = (t >> 32) & 0xFFFF;
-    uint16_t w3 = (t >> 48) & 0xFFFF;
-    PowerPC_instr tmp;
 
-    EMIT_LIS(12, w1);
-    EMIT_RLDICL(12, 12, 0, 32);
-    EMIT_ORI(12, 12, w0);
-    EMIT_LIS(11, w3);
-    EMIT_RLDICL(11, 11, 0, 32);
-    EMIT_ORI(11, 11, w2);
-    GEN_RLDICR(tmp, 11, 11, 32, 31, 0);  /* sldi r11, r11, 32 */
-    set_next_dst(tmp);
-    EMIT_OR(12, 12, 11);
+    /* bl .+8: branch forward 2 instructions, set LR = PC+4 */
+    EMIT_B(2, 0, 1);
+
+    /* Embedded 64-bit address data (2 instruction words) */
+    set_next_dst((PowerPC_instr)(t >> 32));  /* high 32 bits */
+    set_next_dst((PowerPC_instr)(t & 0xFFFFFFFFULL));  /* low 32 bits */
+
+    /* Load the address from embedded data, then call via CTR */
+    EMIT_MFLR(12);        /* r12 = address of embedded data */
+    EMIT_LD(12, 0, 12);   /* r12 = *(uint64_t*)r12 = target address */
     EMIT_MTCTR(12);
     EMIT_BCTRL(0);
 }
