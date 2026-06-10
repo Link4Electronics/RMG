@@ -53,13 +53,13 @@ static void dyna_alarm_handler(int sig) {
     (void)sig;
     fprintf(stderr, "\n[PPC_DYN] *** TIMEOUT after 5s ***\n");
     fprintf(stderr, "[PPC_DYN] TIMEOUT CANARY: "
-            "[0]=%d [2]=0x%08X [3]=%d "
+            "[0]=%d [1]=0x%08X [2]=0x%08X [3]=%d "
             "[4]=0x%08X [5]=0x%08X [6]=0x%08X [7]=0x%08X "
-            "[9]=0x%02X [10]=0x%02X [11]=0x%02X "
+            "[8]=0x%02X [9]=0x%02X [10]=0x%02X [11]=0x%02X "
             "[12]=0x%02X [13]=0x%08X [14]=0x%08X [15]=0x%08X\n",
-            dyna_canary[0], dyna_canary[2], dyna_canary[3],
+            dyna_canary[0], dyna_canary[1], dyna_canary[2], dyna_canary[3],
             dyna_canary[4], dyna_canary[5], dyna_canary[6], dyna_canary[7],
-            dyna_canary[9], dyna_canary[10], dyna_canary[11],
+            dyna_canary[8], dyna_canary[9], dyna_canary[10], dyna_canary[11],
             dyna_canary[12], dyna_canary[13], dyna_canary[14], dyna_canary[15]);
     _exit(1);
 }
@@ -279,13 +279,13 @@ void dynarec(unsigned int address){
                     (dist < 0x2000000LL && dist > -0x2000000LL) ? "IN" : "OUT");
 
             fprintf(stderr, "[PPC_DYN] PRE-RUN CANARY: "
-                    "[0]=%d [2]=0x%08X [3]=%d "
+                    "[0]=%d [1]=0x%08X [2]=0x%08X [3]=%d "
                     "[4]=0x%08X [5]=0x%08X [6]=0x%08X [7]=0x%08X "
-                    "[9]=0x%02X [10]=0x%02X [11]=0x%02X "
+                    "[8]=0x%02X [9]=0x%02X [10]=0x%02X [11]=0x%02X "
                     "[12]=0x%02X [13]=0x%08X [14]=0x%08X [15]=0x%08X\n",
-                    dyna_canary[0], dyna_canary[2], dyna_canary[3],
+                    dyna_canary[0], dyna_canary[1], dyna_canary[2], dyna_canary[3],
                     dyna_canary[4], dyna_canary[5], dyna_canary[6], dyna_canary[7],
-                    dyna_canary[9], dyna_canary[10], dyna_canary[11],
+                    dyna_canary[8], dyna_canary[9], dyna_canary[10], dyna_canary[11],
                     dyna_canary[12], dyna_canary[13], dyna_canary[14], dyna_canary[15]);
         }
         /* Reset canary for this run, then set 5-second timeout */
@@ -303,13 +303,13 @@ void dynarec(unsigned int address){
         if (dbg_iter <= 50) {
             fprintf(stderr, "[PPC_DYN] dyna_run returned naddr=0x%08X link_branch=0x%p\n",
                     interp_addr, (void*)link_branch);
-            fprintf(stderr, "[PPC_DYN] CANARY [0]=%d [2]=0x%08X [3]=%d "
+            fprintf(stderr, "[PPC_DYN] CANARY [0]=%d [1]=0x%08X [2]=0x%08X [3]=%d "
                     "[4]=0x%08X [5]=0x%08X [6]=0x%08X [7]=0x%08X "
-                    "[9]=0x%02X [10]=0x%02X [11]=0x%02X "
+                    "[8]=0x%02X [9]=0x%02X [10]=0x%02X [11]=0x%02X "
                     "[12]=0x%02X [13]=0x%08X [14]=0x%08X [15]=0x%08X\n",
-                    dyna_canary[0], dyna_canary[2], dyna_canary[3],
+                    dyna_canary[0], dyna_canary[1], dyna_canary[2], dyna_canary[3],
                     dyna_canary[4], dyna_canary[5], dyna_canary[6], dyna_canary[7],
-                    dyna_canary[9], dyna_canary[10], dyna_canary[11],
+                    dyna_canary[8], dyna_canary[9], dyna_canary[10], dyna_canary[11],
                     dyna_canary[12], dyna_canary[13], dyna_canary[14], dyna_canary[15]);
         }
 
@@ -875,7 +875,9 @@ static void write_rmg_word(uint32_t vaddr, uint32_t val, uint32_t mask) {
 static int memdbg=0;
 unsigned int dyna_mem(unsigned int value, unsigned int addr,
                       memType type, unsigned int pc, int isDelaySlot){
+    dyna_canary[1] = 0xDEAD;  /* prologue reached (before stack frame) */
     dyna_canary[3] = 1;  /* entered dyna_mem */
+    dyna_canary[8] = 0xBE;  /* before any RDRAM access (prologue alive) */
     if (++memdbg <= 10) fprintf(stderr, "[dyna_mem] type=%d addr=0x%08X pc=0x%08X\n", type, addr, pc);
     uint32_t wval = 0;
     uint64_t dval = 0;
