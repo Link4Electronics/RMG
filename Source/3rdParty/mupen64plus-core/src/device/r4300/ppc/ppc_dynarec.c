@@ -3,6 +3,8 @@
 #include <string.h>
 #include <assert.h>
 #include <math.h>
+#include <signal.h>
+#include <unistd.h>
 
 #include "device/r4300/r4300_core.h"
 #include "device/r4300/cp0.h"
@@ -45,6 +47,18 @@ int failsafeRec = 0;
 int llbit = 0;
 uint32_t delay_slot = 0;
 volatile uint32_t dyna_canary[16] = {0};
+
+/* SIGALRM handler: prints canary state on timeout and exits */
+static void dyna_alarm_handler(int sig) {
+    (void)sig;
+    fprintf(stderr, "\n[PPC_DYN] *** TIMEOUT after 5s ***\n");
+    fprintf(stderr, "[PPC_DYN] TIMEOUT CANARY: "
+            "[0]=%d [3]=%d [4]=%d [5]=%d "
+            "[9]=0x%02X [10]=0x%02X [11]=0x%02X [12]=0x%02X [13]=0x%02X [14]=0x%04X\n",
+            dyna_canary[0], dyna_canary[3], dyna_canary[4], dyna_canary[5],
+            dyna_canary[9], dyna_canary[10], dyna_canary[11], dyna_canary[12], dyna_canary[13], dyna_canary[14]);
+    _exit(1);
+}
 
 /* CP0 register convenience pointers */
 static struct cp0* ppc_cp0 = NULL;
@@ -259,10 +273,25 @@ void dynarec(unsigned int address){
             fprintf(stderr, "[PPC_DYN] calling dyna_run func=0x%p code=0x%p dyna_mem=0x%p dist=%ldKB (%srange)\n",
                     (void*)func, (void*)code, (void*)&dyna_mem, dist/1024,
                     (dist < 0x2000000LL && dist > -0x2000000LL) ? "IN" : "OUT");
+
+            fprintf(stderr, "[PPC_DYN] PRE-RUN CANARY: "
+                    "[0]=%d [3]=%d [4]=%d [5]=%d "
+                    "[9]=0x%02X [10]=0x%02X [11]=0x%02X [12]=0x%02X [13]=0x%02X\n",
+                    dyna_canary[0], dyna_canary[3], dyna_canary[4], dyna_canary[5],
+                    dyna_canary[9], dyna_canary[10], dyna_canary[11], dyna_canary[12], dyna_canary[13]);
         }
+        /* Reset canary for this run, then set 5-second timeout */
+        memset((void*)dyna_canary, 0, sizeof(dyna_canary));
+        signal(SIGALRM, dyna_alarm_handler);
+        alarm(5);
+
         if (last_addr == 0)
             last_addr = address - 4;
         interp_addr = address = dyna_run(func, code);
+
+        alarm(0);
+        signal(SIGALRM, SIG_DFL);
+
         if (dbg_iter <= 50) {
             fprintf(stderr, "[PPC_DYN] dyna_run returned naddr=0x%08X link_branch=0x%p\n",
                     interp_addr, (void*)link_branch);

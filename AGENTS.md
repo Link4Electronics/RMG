@@ -433,10 +433,9 @@ Changed `$(warning ...)` to `$(info ...)` with "supported by RMG" for PPC blocks
 
 ## Current focus
 
-**Primary: Pure interpreter + mupen64plus-video-rice** — get SM64 to render correctly on PPC64 BE via the rice (OpenGL 2.0) plugin.
-
-**Secondary: PPC64 dynarec** — deferred.
-**GLideN64** — deferred in favor of rice (GL 2.0 compatibility on G5).
+**Primary: PPC64 dynarec debugging** — diagnosing hang in first `dyna_run()` call.
+**Secondary: mupen64plus-video-rice** — SM64 rendering (pure interpreter already works).
+**GLideN64** — deferred in favor of rice (OpenGL 2.0 compatibility on G5).
 
 ### Rice plugin status
 
@@ -494,6 +493,18 @@ These symptoms are consistent with `GSetImg` reading all zero fields (because `w
 ### Files
 - `ppc_dynarec.c`: `dyna_canary[16]` global, C-code stores [0]/[5], `dyna_mem()` stores [3]/[4], trampoline `ld` of r31 and store [12], print in `dynarec()` loop
 - `MIPS-to-PPC.c`: `genCallDynaMem()` emits compiled stores for [10]/[11] (1st call) and [13] (subseq calls) using `mem_call_seq` counter
+
+### SIGALRM timeout + canary diagnostics (Jun 10)
+
+Since the CANARY line is only printed AFTER `dyna_run()` returns (it hangs before the print), added a SIGALRM timeout mechanism:
+
+1. **`#include <signal.h>`, `#include <unistd.h>`** — for `signal()`/`alarm()`
+2. **`dyna_alarm_handler()`** — SIGALRM handler: prints full canary dump and calls `_exit(1)`
+3. **PRE-RUN CANARY print** — before each `dyna_run()`, prints the canary state left by the previous run
+4. **Canary reset** — `memset` to zero before each `dyna_run()` call
+5. **Alarm around `dyna_run()`** — `alarm(5)` before, `alarm(0)` + `signal(SIGALRM, SIG_DFL)` after
+
+When the first `dyna_run()` hangs, after 5 seconds the handler fires and shows where it stuck.
 
 ### Reading the CANARY line
 ```
