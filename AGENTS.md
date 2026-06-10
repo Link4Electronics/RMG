@@ -253,12 +253,19 @@ With optimization ≥ `-O1`, GCC's register allocator reuses r14-r23 (declared d
 | **branch() bo/nbo inversion (all six conditions)** | `MIPS-to-PPC.c` | 197-205 | **FIXED** |
 | **r23/DYNAREG_ZERO overwritten by canary trampoline** | `ppc_dynarec.c`, `MIPS-to-PPC.c`, `Register-Cache.c` | 134-136, 1974-1990, 18 | **FIXED** |
 | **Canary-based emit_64bit_call ignores target param** | `MIPS-to-PPC.c` | 54-65 | **FIXED** (reverted to arithmetic) |
+| **GEN_RLDICL sh[5] at wrong LSB0 bit (sub-opcode corruption)** | `PowerPC.h` | 627-636 | **FIXED** — `(((sh)>>5)&1) << 4` → `(((sh)>>5)&1) << 1` (sub-opcode field for rldicl when sh≥32) |
+| **GEN_RLDICR sub-opcode bit missing for sh<32** | `PowerPC.h` | 615-625 | **FIXED** — `(((sh)>>5)&1) << 4` → `(1 << 4)` (sub0 bit always set for rldicr); `(1 << 1)` → `(((sh)>>5)&1) << 1` (sh[5] in xo field) |
+| **emit_64bit_call uses stw+ld+sync to avoid rldicr entirely** | `MIPS-to-PPC.c` | 63-68 | **FIXED** — Replaced `GEN_RLDICR`+`EMIT_OR` with `stw r11,0(r31); stw r12,4(r31); sync; ld r12,0(r31)`. Avoids all 64-bit rotate instructions. |
+| **GEN_SYNC/EMIT_SYNC macros added** | `PowerPC.h`, `Recompile.h` | 382-385, 101-102 | **FIXED** — New macros for sync instruction in compiled code |
+| **dyna_canary 8-byte alignment for ld** | `ppc_dynarec.c` | 49 | **FIXED** — Added `__attribute__((aligned(8)))` to guarantee ld alignment |
 
 ### Known issues
 
 1. **Floating-point control** — `fesetround()` / `mtfsf` / `mffs` path needs runtime verification that rounding mode is set correctly for N64 FE_TOWARDZERO emulation.
 2. **No VMX128 in the CPU dynarec** — The recompiler emits only scalar PPC (add, lwz, stw, rlwinm, etc.). LVX/STVX/VOR macros are standard AltiVec and work on both G4/G5 and Xenon.
-3. **canary[13]=0x70006FFF mystery (Jun 10)** — Arithmetic-based emit_64bit_call stores correct high32(target) to canary[12]=0x00 (verified: low32 of r11=0x7FFF00000000 = 0), but low32(target) stored to canary[13] shows 0x70006FFF instead of expected 0xCC076920. Instructions [14]-[19] in RECOMP dump decode correctly. Suspect: r12 corrupted between arithmetic construction and STW, possibly by an intervening instruction not visible in the truncated dump. Need to dump ALL 385 words to verify. `MIPS-to-PPC.c:44-67`.
+3. **emit_64bit_call wrong r12 (Jun 10)** — The rldicr instruction at position [23] had correct encoding (0x796B03F2 for sh=32, me=31) but produced wrong result (low32 = 0x07FF0000 instead of 0x00000000). Root cause still unidentified — the macro fix doesn't change encoding for sh=32 case. **Replaced rldicr entirely with stw+ld approach** to avoid 64-bit rotate instructions. `MIPS-to-PPC.c:63-68`.
+
+
 
 ---
 
