@@ -271,15 +271,14 @@ With optimization ≥ `-O1`, GCC's register allocator reuses r14-r23 (declared d
 | Pre-store function addresses in canary for ld-from-canary approach | `ppc_dynarec.c`, `MIPS-to-PPC.c` | 317-330, 46-88 | ACTIVE |
 | mfctr reads 0 after mtctr (SPR rename stall on PPC970) | `MIPS-to-PPC.c` | 81-83 | FIXED |
 | GEN_ISYNC/EMIT_ISYNC macros missing | `PowerPC.h`, `Recompile.h` | 382-385, 101-102 | FIXED |
+| X-form shift/ALU source/dest swapped (SRAWI, SLW, SRW, SRAW, AND, NAND, ANDC, NOR, OR, XOR) | `PowerPC.h` | 447-530 | FIXED |
+| SPR macros (MTCTR, MFCTR, MTLR, MFLR) wrong split encoding — SPR field overlapped register field | `PowerPC.h` | 394, 401, 842, 849 | FIXED |
 
 ### Known issues
 
 1. **Floating-point control** — `fesetround()` / `mtfsf` / `mffs` path needs runtime verification that rounding mode is set correctly for N64 FE_TOWARDZERO emulation.
 2. **No VMX128 in the CPU dynarec** — The recompiler emits only scalar PPC (add, lwz, stw, rlwinm, etc.). LVX/STVX/VOR macros are standard AltiVec and work on both G4/G5 and Xenon.
-3. **bctrl never reaches function body (Jun 10)** — Both stw+ld+sync and ld-from-canary approaches confirm correct r12 before bctrl. Even `dyna_test` (trivial `return 1`) fails to execute its first C statement. r1/r2 look valid (canary slots 30-31). Direct C call test added (slots 20-25) to distinguish C-context issue from compiled-code-context issue.
-   - Direct C call test **SUCCEEDS** (canary[24]=1, [25]=0xBE). Problem is compiled-code calling context only.
-   - mfctr reads back CTR=0 after mtctr (canary[15]=0). Suspect PPC970 SPR rename stall.
-   - `isync` added between mtctr and mfctr (Jun 12) — waiting for compile/test to verify.
+3. **bctrl never reaches function body (Jun 10)** — ROOT CAUSE FOUND: two macro bugs in PowerPC.h caused corrupted register values and wrong CTR encoding. See "X-form shift/ALU source/dest swapped" and "SPR macros wrong split encoding" above. Recompiled block now emits correct instructions. Waiting for rebuild/test to confirm bctrl reaches function body.
 4. **GEN_RLDICR/GEN_RLDICL bits 28-29 missing** — These macros emitted unknown instructions on PPC970 by leaving bits 28-29 at 00 instead of 11/10. Fixed Jun 10. EMIT_SLDI (used by sldi+or approach) was affected, but ld-from-canary approach bypasses it entirely.
 
 ### Bug: Asm clobber list uses `%fr14` instead of `fr14` (FIXED)
@@ -295,6 +294,53 @@ With optimization ≥ `-O1`, GCC's register allocator reuses r14-r23 (declared d
 **Symptom:** `dyna_canary[1] = 0xDEAD` in `dyna_mem()` entry was always overwritten by `emit_64bit_call`'s `EMIT_STW(12, 4, 31)` before dyna_mem could run. Made it look like dyna_mem was never entered.
 
 **Fix:** Moved dyna_mem's entry marker to canary[9] (C-code-only slot, not written by compiled code). `dyna_mem()` now sets `dyna_canary[9] = 0xDE`. Slot 9 shows `0xAA` before asm, `0xDE` if dyna_mem entered, `0xFF` after asm returns. `ppc_dynarec.c:878`.
+
+### Bug: X-form shift/ALU source and destination swapped in 10 PowerPC.h macros (FIXED)
+
+**Symptom:** SIGSEGV at `isync` instruction (PC=0x50 in compiled code buffer). Deferred DSI (trap=0x300) with `si_addr=0xBB`. The crash instruction itself (`isync`) was correct — the fault was from a prior instruction whose corrupt value was only consumed (loaded into an address register) much later.
+
+**Root cause:** Ten X-form macros in `PowerPC.h` had RS (source, bits 6-10) and RA (destination, bits 11-15) swapped. In X-form, the operand encoding is:
+- Bits 6-10: RS = source register
+- Bits 11-15: RA = destination register
+
+But the macros used `PPC_SET_RD` (bits 6-10, XO-form dest convention) for the *destination* parameter and `PPC_SET_RA` (bits 11-15) for the *source* parameter — the opposite of what X-form requires. Every call that passed `(dest, src, ...)` emitted `op src, dest, ...`.
+
+Concrete example: `_flushRegister()` in `Register-Cache.c:26` calls `EMIT_SRAWI(0, rLO, 31)` intending `srawi r0, rLO, 31` (sign-extend LO value into r0). The old macro emitted `srawi rLO, r0, 31` — sign-extending garbage in r0 into rLO, then storing rLO as the HI word. This corrupted the register value, which propagated through downstream instructions until an `addi` computed an unmapped address from the garbage, triggering a DSI that was deferred to the next context-synchronizing instruction (`isync`).
+
+**Affected macros:**
+- Shifts: `GEN_SRAWI`, `GEN_SLW`, `GEN_SRW`, `GEN_SRAW`
+- ALU: `GEN_AND`, `GEN_NAND`, `GEN_ANDC`, `GEN_NOR`, `GEN_OR`, `GEN_XOR`
+
+**Fix:** Swapped `PPC_SET_RD` ↔ `PPC_SET_RA` in all 10 macros so callers can naturally write `(dest, src, ...)`. `PowerPC.h:447-530`.
+
+**Note:** `GEN_EXTSW` (lines 493-498) has the same bug but is never called, left unfixed.
+
+### Bug: SPR macros (MTCTR, MFCTR, MTLR, MFLR) wrong split encoding — SPR field overlapped register field (FIXED)
+
+**Symptom:** `mtctr r12` was emitted as `mtspr 288, r12` — a Xenon-specific SPR (SPRN=288) instead of the standard CTR (SPRN=9). On PPC970, `mtspr 288` is either illegal or writes to an implementation-specific register, leaving CTR uninitialized (containing garbage from a previous function call). When `bctrl` later read CTR via the branch unit, it jumped to garbage, crashing or hanging.
+
+**Root cause:** `PPC_SET_SPR(instr, spr)` puts the full 10-bit SPR number at bits 11-20: `instr |= (spr & 0x3FF) << 11`. But `mtspr`/`mfspr` use a **split encoding** per the ISA:
+- Bits 6-10: SPR[4:0] (low 5 bits of SPR number)
+- Bits 11-15: SPR[9:5] (high 5 bits of SPR number)
+- Bits 16-20: RS (for `mtspr`) or RT (for `mfspr`)
+
+With `spr=9` (CTR), `PPC_SET_SPR` placed bits 0-9 at positions 11-20:
+- Bits 11-15 = 0b00000 (should be SPR[9:5] = 0b00000) — correct by coincidence
+- Bits 16-20 = 0b01001 (should be RS field = 0b01100 for r12) — **corrupted**, changing r12→r13
+- Bits 6-10 = 0b00000 (should be SPR[4:0] = 0b01001) — **missing**, SPR[4:0]=0
+
+This encoded SPR=0b0000000000=0 → `mtspr 0, r13` (move to spr0, a different register), but GDB disassembled it as `mtspr 288, r12` due to the bits-16-20 overlap presenting as SPR[9:5]=01001 at bits 6-10. The actual encoding was garbled beyond recognition.
+
+For `spr=8` (LR), the same corruption occurred: `mflr` emitted as `mfspr 256, r13` instead of `mflr r12`.
+
+**Fix:** Replaced `PPC_SET_SPR(ppc, spr)` with manual split encoding for each of the four macros:
+```
+ppc |= ((spr) & 0x1F) << 21;       // SPR[4:0] at bits 6-10
+ppc |= (((spr) >> 5) & 0x1F) << 16; // SPR[9:5] at bits 11-15
+ppc |= PPC_SET_RB(ppc, reg);       // RS/RT at bits 16-20 (via PPC_SET_RB convenience)
+```
+
+`PowerPC.h:394,401,842,849`. Also note that `PPC_SET_RB` is used for the register field because `PPC_SET_RD` (bits 6-10) and `PPC_SET_RA` (bits 11-15) would interfere with the split SPR encoding's position.
 
 ---
 
@@ -471,17 +517,18 @@ Changed `$(warning ...)` to `$(info ...)` with "supported by RMG" for PPC blocks
 
 ## Current focus
 
-**Primary: PPC64 dynarec debugging** — diagnosing hang in first `dyna_run()` call. The `emit_64bit_call` ld-from-canary approach confirms correct r12 = `0x00007FFFCC076830` before bctrl (canary[13]). However, bctrl to ANY C function never reaches the function body — canary[32]=0xCC (right before bctrl) is set, but canary[33]=0xDD (after return) is not, and canary[8]=0xFE (dyna_test body) is not set.
+**Primary: PPC64 dynarec debugging** — ROOT CAUSE FOUND for the SIGSEGV at `isync`. Two macro-layer bugs in `PowerPC.h` caused corrupted register values and a non-functional `mtctr`:
 
-**Key findings:**
-1. Direct C call test (dyna_test called from C before asm) **SUCCEEDS** — returns 1, sets canary[24]=1, canary[25]=0xBE. The problem is **specific to the compiled-code calling context**, not the C environment.
-2. mfctr readback after mtctr reads **CTR=0** (canary[15]=0x00000000) despite mtctr r12 writing the correct address 0x00007FFFCC076830. Theory: **PPC970 SPR rename** — mtctr writes to a rename register, mfctr reads the architectural CTR before the rename is committed.
-3. r1 (canary[30]=0xD577B3F0) and r2 (canary[31]=0xCC0D7F00) look valid — both in user-space ranges.
+1. **X-form source/destination swap** in 10 shift/ALU macros (`GEN_SRAWI`, `GEN_SLW`, `GEN_SRW`, `GEN_SRAW`, `GEN_AND`, `GEN_NAND`, `GEN_ANDC`, `GEN_NOR`, `GEN_OR`, `GEN_XOR`): `EMIT_SRAWI(0, rLO, 31)` in `_flushRegister()` intended `srawi r0, rLO, 31` but emitted `srawi rLO, r0, 31` — sign-extending garbage from r0 into rLO, corrupting the register value. This garbage propagated to an `addi` that computed an unmapped address → DSI → deferred to `isync`. The crash at PC=0x50 with `si_addr=0xBB` was a symptom, not the cause.
 
-**Fix applied (Jun 12):** Added `isync` between `mtctr` and `mfctr` (and also between mtctr and bctrl in the trampoline). `isync` is a context-synchronizing instruction that forces completion of prior instructions, committing the SPR rename before mfctr/bctrl reads CTR. New macros: `GEN_ISYNC` in `PowerPC.h`, `EMIT_ISYNC` in `Recompile.h`.
+2. **SPR split encoding wrong** in `GEN_MTCTR`, `GEN_MFCTR`, `GEN_MTLR`, `GEN_MFLR`: `PPC_SET_SPR(ppc, 9)` placed the full 10-bit SPR at bits 11-20, but `mtspr`/`mfspr` use a split encoding (SPR[4:0] at bits 6-10, SPR[9:5] at bits 11-15). The 5-bit overlap corrupted both the SPR number and the RS/RT register field. `mtctr r12` emitted as `mtspr 288, r12` (garbled) instead of `mtspr 9, r12`. On PPC970, SPR 288 is undefined, so CTR was never properly set — `bctrl` jumped to garbage.
 
-**Diagnostic added:** mfctr readback to canary[15] to verify CTR value after isync.
-Decisive test: first mem_call_seq==1 skips C call entirely (sets r3=0, continues) — canary[36]=0xBB if reached. This will distinguish between "hang in compiled code before first mem access" vs "hang in bctrl/C function call".
+**Fixes applied (Jun 13):**
+- Swapped `PPC_SET_RD` ↔ `PPC_SET_RA` in all 10 X-form macros. `PowerPC.h:447-530`.
+- Replaced `PPC_SET_SPR` with manual split encoding in SPR macros. `PowerPC.h:394,401,842,849`.
+- `GEN_ISYNC`/`EMIT_ISYNC` macros added (context-sync between mtctr and bctrl). `PowerPC.h`, `Recompile.h`.
+
+**Next:** Rebuild and test. The compiled block should now correctly sign-extend registers and set CTR via `mtctr r12`, allowing `bctrl` to reach `dyna_test()` or `dyna_mem()`.
 
 **Secondary: mupen64plus-video-rice** — SM64 rendering (pure interpreter already works).
 **GLideN64** — deferred in favor of rice (OpenGL 2.0 compatibility on G5).
