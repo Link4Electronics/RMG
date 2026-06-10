@@ -1160,11 +1160,6 @@ static int ERET(MIPS_instr mips){
     return CONVERT_SUCCESS;
 }
 
-static int DERET(MIPS_instr mips){
-    genCallInterp(mips);
-    return INTERPRETED;
-}
-
 static int (*gen_tlb[64])(MIPS_instr) = {
    NI  , TLBR, TLBWI, NI, NI, NI, TLBWR, NI,
    TLBP, NI  , NI   , NI, NI, NI, NI   , NI,
