@@ -54,8 +54,11 @@ static void emit_64bit_call(uintptr_t target) {
      */
     uint64_t t = (uint64_t)target;
 
-    /* bl .+8: branch forward 2 instructions, set LR = PC+4 */
-    EMIT_B(2, 0, 1);
+    /* bl .+12: branch forward 3 instructions (12 bytes), set LR = PC+4
+     * The 3 instruction slots are: bl itself + 2 data words for .quad.
+     * After bl executes, LR = addr of .quad data, and execution resumes
+     * at the mflr instruction right after the .quad. */
+    EMIT_B(3, 0, 1);
 
     /* Embedded 64-bit address data (2 instruction words) */
     set_next_dst((PowerPC_instr)(t >> 32));  /* high 32 bits */
