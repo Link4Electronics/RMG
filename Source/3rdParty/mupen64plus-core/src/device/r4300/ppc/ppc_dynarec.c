@@ -122,7 +122,11 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
         "stdu   1, -32(1) \n"
         "mfcr   14        \n"
         "stw    14, 8(1)  \n"
+        "li     0, 0xAA   \n"
+        "stw    0, 36(%4) \n"
         "ld     14, 0(%0) \n"
+        "li     0, 0xBB   \n"
+        "stw    0, 36(%4) \n"
         "ld     15, 8(%0) \n"
         "ld     16, 16(%0)\n"
         "ld     17, 24(%0)\n"
@@ -142,16 +146,22 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
         "mflr   4         \n"
         "addi   4, 4, 28  \n"
         "std    4, 20(1)  \n"
+        "li     0, 0xDD   \n"
+        "stw    0, 36(%4) \n"
         "sync             \n"
         "isync            \n"
+        "li     0, 0xEE   \n"
+        "stw    0, 36(%4) \n"
         "bctrl            \n"
+        "li     0, 0xFF   \n"
+        "stw    0, 36(%4) \n"
         "mr     %1, 3     \n"
         "ld     %3, 20(1) \n"
         "mflr   %2        \n"
         "ld     1, 0(1)   \n"
         : "+r" (ptrs_addr),
           "=r" (naddr), "=r" (link_branch), "=r" (return_addr)
-        :
+        : "r" (dyna_canary)
         : "cr0", "cr2",
             "4","8","9","10","11","12",
             "14","15","16","17","18","19","20","21","22","23",
@@ -263,9 +273,9 @@ void dynarec(unsigned int address){
             fprintf(stderr, "[PPC_DYN] dyna_run returned naddr=0x%08X link_branch=0x%p\n",
                     interp_addr, (void*)link_branch);
             fprintf(stderr, "[PPC_DYN] CANARY [0]=%d [3]=%d [4]=%d [5]=%d "
-                    "[10]=0x%02X [11]=0x%02X [12]=0x%02X [13]=0x%02X\n",
+                    "[9]=0x%02X [10]=0x%02X [11]=0x%02X [12]=0x%02X [13]=0x%02X\n",
                     dyna_canary[0], dyna_canary[3], dyna_canary[4], dyna_canary[5],
-                    dyna_canary[10], dyna_canary[11], dyna_canary[12], dyna_canary[13]);
+                    dyna_canary[9], dyna_canary[10], dyna_canary[11], dyna_canary[12], dyna_canary[13]);
         }
 
         if(!noCheckInterrupt){
