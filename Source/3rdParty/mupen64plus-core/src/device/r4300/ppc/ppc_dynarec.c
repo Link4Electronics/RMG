@@ -171,11 +171,14 @@ unsigned int dyna_run(PowerPC_func* func, unsigned int (*code)(void)){
         : "+r" (ptrs_addr),
           "=r" (naddr), "=r" (link_branch), "=r" (return_addr)
         :
-        : "cr0", "cr2",
-            "4","8","9","10","11","12",
+        : "0", "cr0", "cr1", "cr2",
+            "3","4","5","6","7","8","9","10","11","12",
             "14","15","16","17","18","19","20","21","22","23",
             "24","25","26","27","28","29","30","31","ctr","lr",
-            "%fr14","%fr15","%fr16","%fr17","%fr18","%fr19","%fr20","%fr21","%fr22","%fr23","%fr24","%fr25","%fr26","%fr27",
+            "fr0","fr1","fr2","fr3","fr4","fr5","fr6","fr7",
+            "fr8","fr9","fr10","fr11","fr12","fr13",
+            "fr14","fr15","fr16","fr17","fr18","fr19","fr20",
+            "fr21","fr22","fr23","fr24","fr25","fr26","fr27",
             "memory");
 
     dyna_canary[9] = 0xFF; /* trampoline: after asm returned */
@@ -875,7 +878,7 @@ static void write_rmg_word(uint32_t vaddr, uint32_t val, uint32_t mask) {
 static int memdbg=0;
 unsigned int dyna_mem(unsigned int value, unsigned int addr,
                       memType type, unsigned int pc, int isDelaySlot){
-    dyna_canary[1] = 0xDEAD;  /* prologue reached (before stack frame) */
+    dyna_canary[9] = 0xDE;  /* prologue reached (before stack frame) — slot 9 is C-code-only, not touched by compiled code */
     dyna_canary[3] = 1;  /* entered dyna_mem */
     dyna_canary[8] = 0xBE;  /* before any RDRAM access (prologue alive) */
     if (++memdbg <= 10) fprintf(stderr, "[dyna_mem] type=%d addr=0x%08X pc=0x%08X\n", type, addr, pc);
