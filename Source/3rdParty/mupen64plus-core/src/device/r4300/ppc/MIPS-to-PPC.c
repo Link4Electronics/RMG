@@ -47,26 +47,28 @@ static void emit_64bit_call(uintptr_t target) {
     uint16_t w1 = (t >> 16) & 0xFFFF;
     uint16_t w2 = (t >> 32) & 0xFFFF;
     uint16_t w3 = (t >> 48) & 0xFFFF;
-    PowerPC_instr tmp;
 
     EMIT_LIS(12, w1);
     EMIT_STW(12, 4 * 4, 31);   /* canary[4] = r12 after LIS */
     EMIT_RLWINM(12, 12, 0, 0, 31);
     EMIT_STW(12, 5 * 4, 31);   /* canary[5] = r12 after RLWINM */
     EMIT_ORI(12, 12, w0);
-    EMIT_STW(12, 2 * 4, 31);  /* canary[2] = r12 after low32 construction (no overlap) */
+    EMIT_STW(12, 2 * 4, 31);  /* canary[2] = r12 after low32 construction */
 
     EMIT_LIS(11, w3);
     EMIT_RLWINM(11, 11, 0, 0, 31);
     EMIT_ORI(11, 11, w2);
-    EMIT_STW(11, 7 * 4, 31);  /* canary[7] = r11 BEFORE rldicl (input value to verify) */
-    GEN_RLDICL(tmp, 11, 11, 32, 0, 0);  /* rldicl r11, r11, 32, 0 = rotldi by 32 (upper 32 were zeroed by RLWINM so this = shift) */
-    set_next_dst(tmp);
-    EMIT_STW(11, 14 * 4, 31);  /* canary[14] = r11 after rldicl (high32 part) */
+    EMIT_STW(11, 7 * 4, 31);  /* canary[7] = r11 (high32) */
 
-    EMIT_OR(12, 12, 11);
-    EMIT_STW(12, 15 * 4, 31);  /* canary[15] = r12 after OR (only written once, no overlap) */
-    EMIT_STW(12, 6 * 4, 31);   /* canary[6] = r12 after OR (duplicate, not overwritten) */
+    /* Combine high32(r11) and low32(r12) into 64-bit r12 via stw+ld.
+     * Avoids rldicr/rldicl which had sub-opcode encoding bugs in init code. */
+    EMIT_STW(11, 0, 31);       /* canary[0] <- high32 (MSB half of doubleword on BE) */
+    EMIT_STW(12, 4, 31);       /* canary[1] <- low32 (LSB half) */
+    EMIT_SYNC();               /* ensure stw visible before ld on PPC970 */
+    EMIT_LD(12, 0, 31);        /* r12 = 64-bit load from canary[0..1] */
+    EMIT_STW(12, 14 * 4, 31);  /* canary[14] = r12 low32 after combine */
+    EMIT_STW(11, 15 * 4, 31);  /* canary[15] = r11 high32 preserved */
+    EMIT_STW(12, 6 * 4, 31);   /* canary[6] = r12 low32 after combine (duplicate) */
     EMIT_LI(0, 0xBB);
     EMIT_STW(0, 12 * 4, 31);  /* canary[12] = 0xBB (flag we reached OR) */
 

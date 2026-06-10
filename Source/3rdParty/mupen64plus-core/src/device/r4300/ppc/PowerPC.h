@@ -379,6 +379,11 @@ typedef unsigned int PowerPC_instr;
 
 #define PPC_NOP (0x60000000)
 
+#define GEN_SYNC(ppc) \
+    { ppc = NEW_PPC_INSTR(); \
+      PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
+      PPC_SET_FUNC  (ppc, PPC_FUNC_SYNC); }
+
 #define GEN_B(ppc,dst,aa,lk) \
     { ppc = NEW_PPC_INSTR(); \
       PPC_SET_OPCODE(ppc, PPC_OPCODE_B); \
@@ -620,8 +625,8 @@ typedef unsigned int PowerPC_instr;
       ppc |= ((sh) & 0x1F) << 11; \
       ppc |= (((me) >> 5) & 1) << 10; \
       ppc |= ((me) & 0x1F) << 5; \
-      ppc |= (((sh) >> 5) & 1) << 4; \
-      ppc |= (1 << 1); \
+      ppc |= (1 << 4); \
+      ppc |= (((sh) >> 5) & 1) << 1; \
       ppc |= ((rc) & 1); }
 
 #define GEN_RLDICL(ppc,ra,rs,sh,mb,rc) \
@@ -632,8 +637,7 @@ typedef unsigned int PowerPC_instr;
       ppc |= ((sh) & 0x1F) << 11; \
       ppc |= (((mb) >> 5) & 1) << 10; \
       ppc |= ((mb) & 0x1F) << 5; \
-      ppc |= (((sh) >> 5) & 1) << 4; \
-      ppc |= (0 << 1); \
+      ppc |= (((sh) >> 5) & 1) << 1; \
       ppc |= ((rc) & 1); }
 
 #define GEN_SLD(ppc,ra,rs,sh) \

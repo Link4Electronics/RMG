@@ -46,7 +46,7 @@ int noCheckInterrupt = 0;
 int failsafeRec = 0;
 int llbit = 0;
 uint32_t delay_slot = 0;
-volatile uint32_t dyna_canary[16] = {0};
+volatile uint32_t dyna_canary[16] __attribute__((aligned(8))) = {0};
 
 /* SIGALRM handler: prints canary state on timeout and exits */
 static void dyna_alarm_handler(int sig) {
