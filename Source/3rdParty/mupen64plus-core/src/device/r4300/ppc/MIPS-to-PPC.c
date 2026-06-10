@@ -79,6 +79,7 @@ static void emit_64bit_call(uintptr_t target) {
     EMIT_LI(0, 0xBB);
     EMIT_STW(0, 12 * 4, 31);  /* canary[12] = 0xBB before mtctr */
     EMIT_MTCTR(12);
+    EMIT_ISYNC();                /* context sync: force mtctr to commit */
     EMIT_MFCTR(11);              /* r11 = CTR (read back to verify) */
     EMIT_STW(11, 15 * 4, 31);  /* canary[15] = low32(CTR) */
     EMIT_STW(12, 13 * 4, 31);  /* canary[13] = r12 right before bctrl */

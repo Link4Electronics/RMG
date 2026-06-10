@@ -100,6 +100,8 @@ int disassemble(unsigned int a, unsigned int op);
 {PowerPC_instr ppc;GEN_MTCTR(ppc,rs);set_next_dst(ppc);}
 #define EMIT_SYNC() \
 {PowerPC_instr ppc;GEN_SYNC(ppc);set_next_dst(ppc);}
+#define EMIT_ISYNC() \
+{PowerPC_instr ppc;GEN_ISYNC(ppc);set_next_dst(ppc);}
 #define EMIT_MFCTR(rd) \
 {PowerPC_instr ppc;GEN_MFCTR(ppc,rd);set_next_dst(ppc);}
 #define EMIT_ADDIS(rd,ra,immed) \
