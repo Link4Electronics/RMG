@@ -386,7 +386,7 @@ typedef unsigned int PowerPC_instr;
 
 #define GEN_ISYNC(ppc) \
     { ppc = NEW_PPC_INSTR(); \
-      PPC_SET_OPCODE(ppc, PPC_OPCODE_X); \
+      PPC_SET_OPCODE(ppc, PPC_OPCODE_XL); \
       PPC_SET_FUNC  (ppc, PPC_FUNC_ISYNC); }
 
 #define GEN_B(ppc,dst,aa,lk) \

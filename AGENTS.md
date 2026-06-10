@@ -273,12 +273,13 @@ With optimization ≥ `-O1`, GCC's register allocator reuses r14-r23 (declared d
 | GEN_ISYNC/EMIT_ISYNC macros missing | `PowerPC.h`, `Recompile.h` | 382-385, 101-102 | FIXED |
 | X-form shift/ALU source/dest swapped (SRAWI, SLW, SRW, SRAW, AND, NAND, ANDC, NOR, OR, XOR) | `PowerPC.h` | 447-530 | FIXED |
 | SPR macros (MTCTR, MFCTR, MTLR, MFLR) wrong split encoding — SPR field overlapped register field | `PowerPC.h` | 394, 401, 842, 849 | FIXED |
+| GEN_ISYNC opcode wrong: used PPC_OPCODE_X (31) instead of PPC_OPCODE_XL (19) — emitted stwcx. r0,r0,r0 instead of isync | `PowerPC.h` | 389 | FIXED |
 
 ### Known issues
 
 1. **Floating-point control** — `fesetround()` / `mtfsf` / `mffs` path needs runtime verification that rounding mode is set correctly for N64 FE_TOWARDZERO emulation.
 2. **No VMX128 in the CPU dynarec** — The recompiler emits only scalar PPC (add, lwz, stw, rlwinm, etc.). LVX/STVX/VOR macros are standard AltiVec and work on both G4/G5 and Xenon.
-3. **bctrl never reaches function body (Jun 10)** — ROOT CAUSE FOUND: two macro bugs in PowerPC.h caused corrupted register values and wrong CTR encoding. See "X-form shift/ALU source/dest swapped" and "SPR macros wrong split encoding" above. Recompiled block now emits correct instructions. Waiting for rebuild/test to confirm bctrl reaches function body.
+3. **bctrl never reaches function body (Jun 10)** — ROOT CAUSE FOUND: three macro bugs in PowerPC.h. See "X-form shift/ALU source/dest swapped", "SPR macros wrong split encoding", and "GEN_ISYNC opcode wrong (PPC_OPCODE_X vs XL)" above. Recompiled block now emits correct instructions. Waiting for rebuild/test to confirm bctrl reaches function body.
 4. **GEN_RLDICR/GEN_RLDICL bits 28-29 missing** — These macros emitted unknown instructions on PPC970 by leaving bits 28-29 at 00 instead of 11/10. Fixed Jun 10. EMIT_SLDI (used by sldi+or approach) was affected, but ld-from-canary approach bypasses it entirely.
 
 ### Bug: Asm clobber list uses `%fr14` instead of `fr14` (FIXED)
@@ -517,18 +518,23 @@ Changed `$(warning ...)` to `$(info ...)` with "supported by RMG" for PPC blocks
 
 ## Current focus
 
-**Primary: PPC64 dynarec debugging** — ROOT CAUSE FOUND for the SIGSEGV at `isync`. Two macro-layer bugs in `PowerPC.h` caused corrupted register values and a non-functional `mtctr`:
+**Primary: PPC64 dynarec debugging** — ROOT CAUSE FOUND for ALL crashes to date. Three macro bugs in `PowerPC.h`, each independently sufficient to crash:
 
-1. **X-form source/destination swap** in 10 shift/ALU macros (`GEN_SRAWI`, `GEN_SLW`, `GEN_SRW`, `GEN_SRAW`, `GEN_AND`, `GEN_NAND`, `GEN_ANDC`, `GEN_NOR`, `GEN_OR`, `GEN_XOR`): `EMIT_SRAWI(0, rLO, 31)` in `_flushRegister()` intended `srawi r0, rLO, 31` but emitted `srawi rLO, r0, 31` — sign-extending garbage from r0 into rLO, corrupting the register value. This garbage propagated to an `addi` that computed an unmapped address → DSI → deferred to `isync`. The crash at PC=0x50 with `si_addr=0xBB` was a symptom, not the cause.
+1. **X-form source/destination swap** in 10 shift/ALU macros. `EMIT_SRAWI(0, rLO, 31)` emitted `srawi rLO, r0, 31` instead of `srawi r0, rLO, 31` — sign-extending garbage into the register value, eventually causing a deferred DSI at `isync`.
 
-2. **SPR split encoding wrong** in `GEN_MTCTR`, `GEN_MFCTR`, `GEN_MTLR`, `GEN_MFLR`: `PPC_SET_SPR(ppc, 9)` placed the full 10-bit SPR at bits 11-20, but `mtspr`/`mfspr` use a split encoding (SPR[4:0] at bits 6-10, SPR[9:5] at bits 11-15). The 5-bit overlap corrupted both the SPR number and the RS/RT register field. `mtctr r12` emitted as `mtspr 288, r12` (garbled) instead of `mtspr 9, r12`. On PPC970, SPR 288 is undefined, so CTR was never properly set — `bctrl` jumped to garbage.
+2. **SPR split encoding wrong** in `GEN_MTCTR`/`GEN_MFCTR`/`GEN_MTLR`/`GEN_MFLR`. `PPC_SET_SPR` placed the full 10-bit SPR at the wrong position, corrupting both the SPR number and the register field. CTR was never set — `bctrl` jumped to garbage.
+
+3. **`GEN_ISYNC` opcode wrong**: used `PPC_OPCODE_X` (= 31, X-form) but `isync` requires `PPC_OPCODE_XL` (= 19, XL-form). `PPC_FUNC_ISYNC = 150` equals `PPC_FUNC_STWCX = 150`, so the emitted instruction `7C00012C` decoded as **`stwcx. r0, r0, r0`** — a store-word-conditional to address 0 → DSI → SIGSEGV. This crashed at code buffer offset 0x50 (instruction [20]), **before** `mfctr` at [21] and **before** `bctrl` at [26]. This single bug caused ALL previous "bctrl never reaches function body" and "canary[15]=0 (CTR readback)" symptoms.
 
 **Fixes applied (Jun 13):**
 - Swapped `PPC_SET_RD` ↔ `PPC_SET_RA` in all 10 X-form macros. `PowerPC.h:447-530`.
 - Replaced `PPC_SET_SPR` with manual split encoding in SPR macros. `PowerPC.h:394,401,842,849`.
-- `GEN_ISYNC`/`EMIT_ISYNC` macros added (context-sync between mtctr and bctrl). `PowerPC.h`, `Recompile.h`.
+- `GEN_ISYNC`: changed `PPC_OPCODE_X` → `PPC_OPCODE_XL`. `PowerPC.h:389`.
 
-**Next:** Rebuild and test. The compiled block should now correctly sign-extend registers and set CTR via `mtctr r12`, allowing `bctrl` to reach `dyna_test()` or `dyna_mem()`.
+**Next:** Rebuild and test. With all three fixes:
+- Sign-extension in `_flushRegister` is now correct → no garbage register values → no deferred DSI
+- `mtctr r12` now correctly writes CTR (SPR 9, not 288) → `bctrl` jumps to the right address
+- `isync` is now correctly encoded (opcode 19, not 31) → no spurious `stwcx.` to address 0 → no crash at offset 0x50, execution reaches `bctrl` at [26]
 
 **Secondary: mupen64plus-video-rice** — SM64 rendering (pure interpreter already works).
 **GLideN64** — deferred in favor of rice (OpenGL 2.0 compatibility on G5).
