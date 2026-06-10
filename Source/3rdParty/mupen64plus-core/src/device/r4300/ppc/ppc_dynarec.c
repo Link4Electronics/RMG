@@ -884,8 +884,8 @@ static void write_rmg_word(uint32_t vaddr, uint32_t val, uint32_t mask) {
 /* Test function: same signature as dyna_mem, just returns a constant.
  * Does NOT touch any global/static variables — only registers and stack.
  * Used to verify whether bctrl reaches the called function at all. */
-static unsigned int dyna_test(unsigned int value, unsigned int addr,
-                              memType type, unsigned int pc, int isDelaySlot){
+unsigned int dyna_test(unsigned int value, unsigned int addr,
+                       memType type, unsigned int pc, int isDelaySlot){
     (void)value; (void)addr; (void)type; (void)pc; (void)isDelaySlot;
     return 1;
 }
