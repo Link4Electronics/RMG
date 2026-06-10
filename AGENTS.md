@@ -139,11 +139,15 @@ The `PPC_SET_SPR` macro itself (`(spr & 0x3FF) << 11`) is **correct** for standa
 
 **Fix:** Set `availableRegsDefault[2]=0` and `availableRegsDefault[13]=0` in `Register-Cache.c`. Only r24-r31 available for MIPS GPR mapping.
 
-### Bug: D-cache/I-cache coherency (FIXED)
+### Bug: D-cache/I-cache coherency (FIXED — REVERTED FOR PPC970)
 
-**Symptom:** `dcbf` is a hint instruction (can be ignored); `ICInvalidateRange` had no `sync` before `isync`.
+**Symptom:** First compiled block hangs before any dyna_mem call. No debug output after `dyna_run` entry.
 
-**Fix:** Changed `dcbf` → `dcbst` (guaranteed store-back); added `sync` before `isync`. `Recomp-Cache.c`.
+**Root cause:** PPC970 (G5) erratum — `icbi` does not invalidate I-cache when the D-cache line is still valid (clean but present). `dcbst` writes back but keeps the line valid; `dcbf` writes back AND invalidates, which is what `icbi` requires on PPC970.
+
+**Original fix (for Xenon):** Changed `dcbf` → `dcbst` — correct on Xenon where `dcbf` is a hint, but WRONG on PPC970 where `dcbf` works and `dcbst` breaks icbi.
+
+**PPC970 fix:** Changed `dcbst` → `dcbf`. Also added `sync` before `isync` in ICInvalidateRange (kept). `Recomp-Cache.c:18`.
 
 ### Bug: `get_physical_addr()` returned data instead of address (FIXED)
 
