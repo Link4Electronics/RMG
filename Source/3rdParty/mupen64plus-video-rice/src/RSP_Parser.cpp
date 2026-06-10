@@ -713,14 +713,14 @@ uint32 DLParser_CheckUcode(uint32 ucStart, uint32 ucDStart, uint32 ucSize, uint3
     {
         for ( uint32 i = 0; i < 0x1000; i++ )
         {
-            if ( g_pRDRAMs8[ base + ((i+0) ^ 3) ] == 'R' &&
-                 g_pRDRAMs8[ base + ((i+1) ^ 3) ] == 'S' &&
-                 g_pRDRAMs8[ base + ((i+2) ^ 3) ] == 'P' )
+            if ( g_pRDRAMs8[ base + ((i+0) ^ N64_XOR(3)) ] == 'R' &&
+                 g_pRDRAMs8[ base + ((i+1) ^ N64_XOR(3)) ] == 'S' &&
+                 g_pRDRAMs8[ base + ((i+2) ^ N64_XOR(3)) ] == 'P' )
             {
                 unsigned char * p = str;
-                while ( g_pRDRAMs8[ base + (i ^ 3) ] >= ' ')
+                while ( g_pRDRAMs8[ base + (i ^ N64_XOR(3)) ] >= ' ')
                 {
-                    *p++ = g_pRDRAMs8[ base + (i ^ 3) ];
+                    *p++ = g_pRDRAMs8[ base + (i ^ N64_XOR(3)) ];
                     i++;
                 }
                 *p++ = 0;
@@ -734,8 +734,21 @@ uint32 DLParser_CheckUcode(uint32 ucStart, uint32 ucDStart, uint32 ucSize, uint3
         //uint32 size = ucDSize;
         base = ucStart & 0x1fffffff;
 
-        uint32 crc_size = ComputeCRC32( 0, &g_pRDRAMu8[ base ], 8);//size );
-        uint32 crc_800 = ComputeCRC32( 0, &g_pRDRAMu8[ base ], 0x800 );
+        uint32 crc_size, crc_800;
+#if defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+        // On BE, byte-swap each 32-bit word to match LE CRC table values
+        {
+            uint32 ucode_buf[0x800/4];
+            for (uint32 j = 0; j < 0x800/4; j++) {
+                ucode_buf[j] = __builtin_bswap32(((uint32*)&g_pRDRAMu8[base])[j]);
+            }
+            crc_size = ComputeCRC32(0, (uint8*)ucode_buf, 8);
+            crc_800 = ComputeCRC32(0, (uint8*)ucode_buf, 0x800);
+        }
+#else
+        crc_size = ComputeCRC32( 0, &g_pRDRAMu8[ base ], 8);
+        crc_800 = ComputeCRC32( 0, &g_pRDRAMu8[ base ], 0x800);
+#endif
         uint32 ucode;
         ucode = DLParser_IdentifyUcode( crc_size, crc_800, (char*)str );
         if ( (int)ucode == ~0 )
@@ -1001,7 +1014,30 @@ void DLParser_Process(OSTask * pTask)
                 i, (uint32)pTask->t.data_ptr + i*8,
                 pgfx0[i].words.w0, pgfx0[i].words.w1, pgfx0[i].words.w0 >> 24);
         }
-        // Print entries around opcode 0xFD range (0xF0-0xFF)
+        // Scan ALL entries for GBI1 commands outside 0xF0-0xFF range
+        // Note: GBI1 places G_DL at opcode 0x06, G_ENDDL at 0xB8, etc.
+        // The 0xF0-0xFF range is already scanned below for RDP commands.
+        bool nonRdpFound = false;
+        for (int i = 0; i < 512; i++) {
+            uint8 op = pgfx0[i].words.w0 >> 24;
+            if (op < 0xF0) {
+                const char *name = (gRSP.ucode!=5&&gRSP.ucode!=10 && op < 256) ?
+                    ucodeNames_GBI1[op] : ucodeNames_GBI2[op];
+                if (op == 0x06 || op == 0xB8 || op == 0xBB || op == 0xBC ||
+                    op == 0xBD || op == 0xBE || op == 0xBF ||
+                    op == 0xB0 || op == 0xB1 || op == 0x01 ||
+                    op == 0x03 || op == 0x04) {
+                    fprintf(stderr, "RICE:   GBI1[%d] pc=0x%08X w0=0x%08X w1=0x%08X op=%02X (%s)\n",
+                        i, (uint32)pTask->t.data_ptr + i*8,
+                        pgfx0[i].words.w0, pgfx0[i].words.w1, op, name);
+                    nonRdpFound = true;
+                }
+            }
+        }
+        if (!nonRdpFound) {
+            fprintf(stderr, "RICE: NO GBI1 commands (G_DL/G_ENDDL/etc) in first 512 DL entries\n");
+        }
+        // Print ALL RDP commands (0xF0-0xFF)
         for (int i = 0; i < 512; i++) {
             uint8 op = pgfx0[i].words.w0 >> 24;
             if (op >= 0xF0 && op <= 0xFF) {
