@@ -53,10 +53,11 @@ static void dyna_alarm_handler(int sig) {
     (void)sig;
     fprintf(stderr, "\n[PPC_DYN] *** TIMEOUT after 5s ***\n");
     fprintf(stderr, "[PPC_DYN] TIMEOUT CANARY: "
-            "[0]=%d [3]=%d [4]=%d [5]=%d "
+            "[0]=%d [3]=%d [4]=0x%08X [5]=0x%08X [6]=0x%08X "
             "[9]=0x%02X [10]=0x%02X [11]=0x%02X "
             "[12]=0x%02X [13]=0x%08X [14]=0x%08X [15]=0x%08X\n",
-            dyna_canary[0], dyna_canary[3], dyna_canary[4], dyna_canary[5],
+            dyna_canary[0], dyna_canary[3],
+            dyna_canary[4], dyna_canary[5], dyna_canary[6],
             dyna_canary[9], dyna_canary[10], dyna_canary[11],
             dyna_canary[12], dyna_canary[13], dyna_canary[14], dyna_canary[15]);
     _exit(1);
@@ -277,10 +278,11 @@ void dynarec(unsigned int address){
                     (dist < 0x2000000LL && dist > -0x2000000LL) ? "IN" : "OUT");
 
             fprintf(stderr, "[PPC_DYN] PRE-RUN CANARY: "
-                    "[0]=%d [3]=%d [4]=%d [5]=%d "
+                    "[0]=%d [3]=%d [4]=0x%08X [5]=0x%08X [6]=0x%08X "
                     "[9]=0x%02X [10]=0x%02X [11]=0x%02X "
                     "[12]=0x%02X [13]=0x%08X [14]=0x%08X [15]=0x%08X\n",
-                    dyna_canary[0], dyna_canary[3], dyna_canary[4], dyna_canary[5],
+                    dyna_canary[0], dyna_canary[3],
+                    dyna_canary[4], dyna_canary[5], dyna_canary[6],
                     dyna_canary[9], dyna_canary[10], dyna_canary[11],
                     dyna_canary[12], dyna_canary[13], dyna_canary[14], dyna_canary[15]);
         }
@@ -299,10 +301,11 @@ void dynarec(unsigned int address){
         if (dbg_iter <= 50) {
             fprintf(stderr, "[PPC_DYN] dyna_run returned naddr=0x%08X link_branch=0x%p\n",
                     interp_addr, (void*)link_branch);
-            fprintf(stderr, "[PPC_DYN] CANARY [0]=%d [3]=%d [4]=%d [5]=%d "
+            fprintf(stderr, "[PPC_DYN] CANARY [0]=%d [3]=%d [4]=0x%08X [5]=0x%08X [6]=0x%08X "
                     "[9]=0x%02X [10]=0x%02X [11]=0x%02X "
                     "[12]=0x%02X [13]=0x%08X [14]=0x%08X [15]=0x%08X\n",
-                    dyna_canary[0], dyna_canary[3], dyna_canary[4], dyna_canary[5],
+                    dyna_canary[0], dyna_canary[3],
+                    dyna_canary[4], dyna_canary[5], dyna_canary[6],
                     dyna_canary[9], dyna_canary[10], dyna_canary[11],
                     dyna_canary[12], dyna_canary[13], dyna_canary[14], dyna_canary[15]);
         }

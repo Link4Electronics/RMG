@@ -50,7 +50,9 @@ static void emit_64bit_call(uintptr_t target) {
     PowerPC_instr tmp;
 
     EMIT_LIS(12, w1);
+    EMIT_STW(12, 4 * 4, 31);   /* canary[4] = r12 after LIS */
     EMIT_RLDICL(12, 12, 0, 32);
+    EMIT_STW(12, 5 * 4, 31);   /* canary[5] = r12 after RLDICL */
     EMIT_ORI(12, 12, w0);
     EMIT_STW(12, 15 * 4, 31);  /* canary[15] = r12 after low32 construction */
 
@@ -63,6 +65,7 @@ static void emit_64bit_call(uintptr_t target) {
 
     EMIT_OR(12, 12, 11);
     EMIT_STW(12, 15 * 4, 31);  /* canary[15] = r12 after OR (overwrites previous) */
+    EMIT_STW(12, 6 * 4, 31);   /* canary[6] = r12 after OR (duplicate, not overwritten) */
     EMIT_LI(0, 0xBB);
     EMIT_STW(0, 12 * 4, 31);  /* canary[12] = 0xBB (flag we reached OR) */
 
