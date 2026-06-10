@@ -215,6 +215,17 @@ With optimization ≥ `-O1`, GCC's register allocator reuses r14-r23 (declared d
 
 **Fix:** Merged both asm blocks into one so register setup happens in the same block as the bctrl call. Operand renumbered: inputs %4-%13 (9 setup ptrs + code), outputs %0-%3 (naddr, link_branch, return_addr, last_func). `ppc_dynarec.c:98-137`.
 
+### Bug: Canary trampoline overwrites DYNAREG_ZERO (r23) (FIXED)
+
+**Symptom:** First compiled block at `0xA4000040` executes and never returns — `dyna_run()` bctrl never comes back even though the compiled code has a BLR at the end. The `dyna_mem()` C function is never reached (no `[dyna_mem]` debug output).
+
+**Root cause:** The canary trampoline in `dyna_run()` loads `r23 = dyna_canary` (`ld 23, 88(%0)` at line 134). But `DYNAREG_ZERO = 23` (`Wrappers.h:15`). Every time the compiled code references MIPS register `$zero` via `mapRegister(0) → DYNAREG_ZERO → r23`, it gets the canary address instead of 0. This corrupts all ALU operations, stores, and memory accesses using `$zero`, including the llbit and COP0 register stores at `MIPS-to-PPC.c:1142,1232` which use `EMIT_STW(DYNAREG_ZERO, ...)`.
+
+**Fix:** Moved the canary pointer from r23 to r31:
+- `ppc_dynarec.c` trampoline: `ld 23, 88(%0)` → `ld 31, 88(%0)` + `li 23, 0` (restore DYNAREG_ZERO), `stw 0, 48(23)` → `stw 0, 48(31)`
+- `MIPS-to-PPC.c` genCallDynaMem: all `EMIT_STW(0, offset, 23)` → `EMIT_STW(0, offset, 31)`
+- `Register-Cache.c`: `availableRegsDefault[31] = 0` (removed r31 from allocator pool)
+
 ### Bug list reminder
 
 | Bug | File | Lines | Status |
@@ -240,6 +251,7 @@ With optimization ≥ `-O1`, GCC's register allocator reuses r14-r23 (declared d
 | **start_new_block() stale-code** | `MIPS-to-PPC.c` | 112-116 | FIXED |
 | **rldicl after lis** | `PowerPC.h`, `Recompile.h` | 627-636, 165-166 | FIXED |
 | **branch() bo/nbo inversion (all six conditions)** | `MIPS-to-PPC.c` | 197-205 | **FIXED** |
+| **r23/DYNAREG_ZERO overwritten by canary trampoline** | `ppc_dynarec.c`, `MIPS-to-PPC.c`, `Register-Cache.c` | 134-136, 1974-1990, 18 | **FIXED** |
 
 ### Known issues
 
@@ -476,11 +488,11 @@ These symptoms are consistent with `GSetImg` reading all zero fields (because `w
 | `[5]` | `dyna_run()` C code after asm | `1` | asm block returned |
 | `[10]` | Compiled PPC code before 1st `bctrl` | `0xCC` | 1st genCallDynaMem reached |
 | `[11]` | Compiled PPC code after 1st `bctrl` | `0xDD` | 1st dyna_mem returned |
-| `[12]` | Trampoline `stw 0, 48(23)` before `bctrl` | `0xCC` | r23 loaded, trampoline OK |
+| `[12]` | Trampoline `stw 0, 48(31)` before `bctrl` | `0xCC` | r31 loaded with canary ptr, trampoline OK |
 | `[13]` | Compiled PPC code before 2nd+ `bctrl` | `0xEE` | Subsequent genCallDynaMem reached |
 
 ### Files
-- `ppc_dynarec.c`: `dyna_canary[16]` global, C-code stores [0]/[5], `dyna_mem()` stores [3]/[4], trampoline `ld` of r23 and store [12], print in `dynarec()` loop
+- `ppc_dynarec.c`: `dyna_canary[16]` global, C-code stores [0]/[5], `dyna_mem()` stores [3]/[4], trampoline `ld` of r31 and store [12], print in `dynarec()` loop
 - `MIPS-to-PPC.c`: `genCallDynaMem()` emits compiled stores for [10]/[11] (1st call) and [13] (subseq calls) using `mem_call_seq` counter
 
 ### Reading the CANARY line

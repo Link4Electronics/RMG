@@ -1971,10 +1971,10 @@ static int mem_call_seq = 0;
 void genCallDynaMem(memType type, int base, short immed){
     if (mem_call_seq == 0) {
         EMIT_LI(0, 0xCC);
-        EMIT_STW(0, 40, 23);      /* canary[10] = 0xCC (1st call, before dyna_mem) */
+        EMIT_STW(0, 40, 31);      /* canary[10] = 0xCC (1st call, before dyna_mem) */
     } else {
         EMIT_LI(0, 0xEE);
-        EMIT_STW(0, 52, 23);      /* canary[13] = 0xEE (subseq call, before dyna_mem) */
+        EMIT_STW(0, 52, 31);      /* canary[13] = 0xEE (subseq call, before dyna_mem) */
     }
     mem_call_seq++;
 
@@ -1987,7 +1987,7 @@ void genCallDynaMem(memType type, int base, short immed){
 
     if (mem_call_seq == 1) {
         EMIT_LI(0, 0xDD);
-        EMIT_STW(0, 44, 23);      /* canary[11] = 0xDD (1st call, returned from dyna_mem) */
+        EMIT_STW(0, 44, 31);      /* canary[11] = 0xDD (1st call, returned from dyna_mem) */
     }
     EMIT_LD(0, DYNAOFF_LR, 1);
     EMIT_CMPI(3, 0, 6);

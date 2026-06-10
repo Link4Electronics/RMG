@@ -12,10 +12,10 @@ static struct {
 static unsigned int nextLRUVal;
 static int availableRegsDefault[32] = {
     /* r0=r1 reserved, r2=TOC(r2) reserved on PPC64, r3-r12 arg/scratch,
-       r13=small-data(thread ptr) reserved, r14-r23=DYNAREG fixed registers,
-       r24-r31 general purpose */
+       r13=small-data(thread ptr) reserved, r14-r22=DYNAREG fixed registers,
+       r23=DYNAREG_ZERO, r24-r30 general purpose, r31=canary pointer */
     0,0,0, 0,0,0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1
+    0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,0
     };
 static int availableRegs[32];
 
