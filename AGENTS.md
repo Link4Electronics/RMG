@@ -505,3 +505,33 @@ CANARY [0]=1 [3]=0 [4]=0 [5]=0 [10]=0x00 [11]=0x00 [12]=0xCC
 - `[3]=1` + `[4]=0`: dyna_mem entered but hung inside the switch
 - `[11]=0xDD` + `[5]=0`: dyna_mem returned but asm block never completed (BNELR or subsequent call hung)
 - `[13]=0xEE`: at least two memory accesses reached in compiled code
+
+## Future: generic PPC dynarec architecture
+
+The current dynarec targets PPC64 BE (ELFv2) only. To support PPC32 BE (Mac G4/GC/Wii) or PPC64 LE (POWER8+), the recommended architecture is:
+
+### Core shared files (ABI-independent)
+
+| File | Role |
+|------|------|
+| `PowerPC.h` | PPC instruction encoding macros — already bit-level, endian-independent |
+| `MIPS-to-PPC.c` | MIPS→PPC translator, register allocator calls, memory/COP0 helpers |
+| `Register-Cache.c` / `.h` | GPR/FPR register allocator |
+| `Recomp-Cache.c` / `.h` | Recompiled code cache with LRU |
+| `FuncTree.c` / `.h` | BST for recompiled block lookup |
+| `Recompile.c` / `.h` | Block compilation, jump fixup, `genJumpPad()` |
+
+### Variant-specific trampoline/call-emission files
+
+| Variant | File(s) | Key differences from PPC64 BE |
+|---------|---------|-------------------------------|
+| PPC64 BE | `ppc_dynarec.c` (current) | 64-bit `ld`/`std`, MIPS reg offset `i*8+4` (high 32 of 64-bit slot on BE), r2=TOC, r13=TP, `r1+20` LR save, `emit_64bit_call` uses `rldicl`/`sldi` |
+| PPC64 LE | `ppc_dynarec_64_le.c` + variant of `MIPS-to-PPC.c` for reg offset | Same pointer size, but MIPS reg offset = `i*8+0` (low 32), `emit_64bit_call` ok, cache line = 128 bytes (POWER8+), `dcbf`/`icbi` loop stride changes |
+| PPC32 BE | `ppc_dynarec_32.c` + variant headers | 32-bit `lwz`/`stw` for pointers, MIPS reg offset `i*4` (32-bit array), `emit_64bit_call` unnecessary (32-bit range), r13=TP only, LR save at `r1+4`. Reference: dot64 N64 emulator for GC/Wii (https://github.com/AirGamez/dot64) which already has a working PPC32 BE dynarec |
+
+### Strategy
+
+- Define a common interface (e.g. `PPC_DYNAREC_INIT`, `PPC_DYNAREC_RUN`, trampoline setup, `emit_64bit_call` signature) that all variants implement
+- Put variant-specific register assignments (reserved regs, MIPS reg offset, LR offset) in a small `ppc_dynarec_variant.h` that each variant provides
+- `MIPS-to-PPC.c` includes the variant header and uses macros like `MIPS_REG_OFFSET(i)` and `MIPS_REG_BASE_REG` so the same translator code works across BE/LE and 32/64
+- Cache line size and `dcbf`/`icbi` stride come from the variant header too
