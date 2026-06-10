@@ -69,12 +69,18 @@ static void emit_64bit_call(uintptr_t target) {
     EMIT_STW(12, 14 * 4, 31);  /* canary[14] = r12 low32 after combine */
     EMIT_STW(11, 15 * 4, 31);  /* canary[15] = r11 high32 preserved */
     EMIT_STW(12, 6 * 4, 31);   /* canary[6] = r12 low32 after combine (duplicate) */
+    EMIT_STW(1, 30 * 4, 31);   /* canary[30] = r1 (stack pointer low32) */
+    EMIT_STW(2, 31 * 4, 31);   /* canary[31] = r2 (TOC pointer low32) */
     EMIT_LI(0, 0xBB);
     EMIT_STW(0, 12 * 4, 31);  /* canary[12] = 0xBB (flag we reached OR) */
 
     EMIT_MTCTR(12);
     EMIT_STW(12, 13 * 4, 31);  /* canary[13] = r12 right before bctrl */
+    EMIT_LI(0, 0xCC);
+    EMIT_STW(0, 32 * 4, 31);  /* canary[32] = 0xCC right before bctrl */
     EMIT_BCTRL(0);
+    EMIT_LI(0, 0xDD);
+    EMIT_STW(0, 33 * 4, 31);  /* canary[33] = 0xDD right after bctrl returned */
 }
 
 #define CANT_COMPILE_DELAY() \
@@ -1982,16 +1988,24 @@ void genCallDynaMem(memType type, int base, short immed){
     EMIT_ORI(6, 6, get_src_pc()+4);
     EMIT_LI(7, isDelaySlot ? 1 : 0);
     if (mem_call_seq == 1) {
-        /* First call goes to dyna_test to verify bctrl mechanism works */
+        /* First memory access: DIAGNOSTIC — skip C function call entirely.
+         * Just set r3=0 (no special handling) and let the block continue.
+         * This tests whether the hang is in the bctrl mechanism vs. in the
+         * compiled code before the first memory access.
+         * The MIPS load/store instruction will get garbage data, but the
+         * block itself should continue executing without a host crash. */
+        EMIT_LI(0, 0xBB);
+        EMIT_STW(0, 36 * 4, 31);  /* canary[36] = 0xBB (skipped C call) */
+        EMIT_LI(3, 0);            /* return 0 = normal, no special handling */
+    } else if (mem_call_seq == 2) {
+        /* Second memory access: call dyna_test (trivial function, returns 1) */
         emit_64bit_call((uintptr_t)(&dyna_test));
+        EMIT_LI(0, 0xDD);
+        EMIT_STW(0, 44, 31);      /* canary[11] = 0xDD (first real call returned) */
     } else {
         emit_64bit_call((uintptr_t)(&dyna_mem));
     }
 
-    if (mem_call_seq == 1) {
-        EMIT_LI(0, 0xDD);
-        EMIT_STW(0, 44, 31);      /* canary[11] = 0xDD (first call returned) */
-    }
     EMIT_LD(0, DYNAOFF_LR, 1);
     EMIT_CMPI(3, 0, 6);
     EMIT_MTLR(0);

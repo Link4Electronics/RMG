@@ -46,7 +46,7 @@ int noCheckInterrupt = 0;
 int failsafeRec = 0;
 int llbit = 0;
 uint32_t delay_slot = 0;
-volatile uint32_t dyna_canary[16] __attribute__((aligned(8))) = {0};
+volatile uint32_t dyna_canary[40] __attribute__((aligned(8))) = {0};
 
 /* SIGALRM handler: prints canary state on timeout and exits */
 static void dyna_alarm_handler(int sig) {
@@ -56,11 +56,15 @@ static void dyna_alarm_handler(int sig) {
             "[0]=%d [1]=0x%08X [2]=0x%08X [3]=%d "
             "[4]=0x%08X [5]=0x%08X [6]=0x%08X [7]=0x%08X "
             "[8]=0x%02X [9]=0x%02X [10]=0x%02X [11]=0x%02X "
-            "[12]=0x%02X [13]=0x%08X [14]=0x%08X [15]=0x%08X\n",
+            "[12]=0x%02X [13]=0x%08X [14]=0x%08X [15]=0x%08X"
+            " [30]=0x%08X [31]=0x%08X [32]=0x%02X [33]=0x%02X"
+            " [36]=0x%02X\n",
             dyna_canary[0], dyna_canary[1], dyna_canary[2], dyna_canary[3],
             dyna_canary[4], dyna_canary[5], dyna_canary[6], dyna_canary[7],
             dyna_canary[8], dyna_canary[9], dyna_canary[10], dyna_canary[11],
-            dyna_canary[12], dyna_canary[13], dyna_canary[14], dyna_canary[15]);
+            dyna_canary[12], dyna_canary[13], dyna_canary[14], dyna_canary[15],
+            dyna_canary[30], dyna_canary[31], dyna_canary[32], dyna_canary[33],
+            dyna_canary[36]);
     _exit(1);
 }
 
@@ -307,11 +311,15 @@ void dynarec(unsigned int address){
             fprintf(stderr, "[PPC_DYN] CANARY [0]=%d [1]=0x%08X [2]=0x%08X [3]=%d "
                     "[4]=0x%08X [5]=0x%08X [6]=0x%08X [7]=0x%08X "
                     "[8]=0x%02X [9]=0x%02X [10]=0x%02X [11]=0x%02X "
-                    "[12]=0x%02X [13]=0x%08X [14]=0x%08X [15]=0x%08X\n",
+                    "[12]=0x%02X [13]=0x%08X [14]=0x%08X [15]=0x%08X"
+                    " [30]=0x%08X [31]=0x%08X [32]=0x%02X [33]=0x%02X"
+                    " [36]=0x%02X\n",
                     dyna_canary[0], dyna_canary[1], dyna_canary[2], dyna_canary[3],
                     dyna_canary[4], dyna_canary[5], dyna_canary[6], dyna_canary[7],
                     dyna_canary[8], dyna_canary[9], dyna_canary[10], dyna_canary[11],
-                    dyna_canary[12], dyna_canary[13], dyna_canary[14], dyna_canary[15]);
+                    dyna_canary[12], dyna_canary[13], dyna_canary[14], dyna_canary[15],
+                    dyna_canary[30], dyna_canary[31], dyna_canary[32], dyna_canary[33],
+                    dyna_canary[36]);
         }
 
         if(!noCheckInterrupt){
@@ -873,12 +881,13 @@ static void write_rmg_word(uint32_t vaddr, uint32_t val, uint32_t mask) {
 #define BE_INSERT_BYTE(w, val, b)  ((w) = ((w) & ~(0xFFU  << (24 - ((b)<<3)))) | (((uint32_t)(val) & 0xFFU)  << (24 - ((b)<<3))))
 #define BE_INSERT_HWORD(w, val, b) ((w) = ((w) & ~(0xFFFFU << (16 - ((b)<<4)))) | (((uint32_t)(val) & 0xFFFFU) << (16 - ((b)<<4))))
 
-/* Test function: same signature as dyna_mem, just sets canary and returns 0.
+/* Test function: same signature as dyna_mem, just returns a constant.
+ * Does NOT touch any global/static variables — only registers and stack.
  * Used to verify whether bctrl reaches the called function at all. */
-unsigned int dyna_test(unsigned int value, unsigned int addr,
-                       memType type, unsigned int pc, int isDelaySlot){
-    dyna_canary[9] = 0xFE;
-    return 0;
+static unsigned int dyna_test(unsigned int value, unsigned int addr,
+                              memType type, unsigned int pc, int isDelaySlot){
+    (void)value; (void)addr; (void)type; (void)pc; (void)isDelaySlot;
+    return 1;
 }
 
 static int memdbg=0;
