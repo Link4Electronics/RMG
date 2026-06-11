@@ -145,7 +145,7 @@ The `PPC_SET_SPR` macro (`(spr & 0x3FF) << 11`) is **not usable** for `mtspr`/`m
 
 **First PPC970 fix:** Changed `dcbst` → `dcbf`. Also added `sync` before `isync` in ICInvalidateRange (kept). `Recomp-Cache.c:18`.
 
-**Second PPC970 fix (Jun 14):** Changed separate `dcbf` loop + `icbi` loop to a **combined interleaved loop** (`dcbf` + `icbi` per cache line). The hardware prefetcher can speculatively reload D-cache lines between two separate loops, re-validating the D-cache after `dcbf` but before `icbi`. This re-validation causes `icbi` to skip I-cache invalidation per the erratum. The interleaved approach eliminates the speculation gap. `Recomp-Cache.c:13-30`.
+**Second PPC970 fix (Jun 14):** Changed separate `dcbf` loop + `icbi` loop to a **combined interleaved loop** (`dcbf` + `sync` + `icbi` per cache line). The hardware prefetcher can speculatively reload D-cache lines between two separate loops, re-validating the D-cache after `dcbf` but before `icbi`. This re-validation causes `icbi` to skip I-cache invalidation per the erratum. Even within a combined loop, `dcbf` is weakly ordered on PPC970 — `icbi` may execute before `dcbf`'s invalidation completes. Added `sync` between `dcbf` and `icbi` per cache line to force completion. `Recomp-Cache.c:13-30`.
 
 ### Bug: `get_physical_addr()` returned data instead of address (FIXED)
 
@@ -548,7 +548,7 @@ Changed `$(warning ...)` to `$(info ...)` with "supported by RMG" for PPC blocks
 
 ### Fixes applied this session (Jun 14):
 
-1. **`Recomp-Cache.c:13-30`** — Created `FlushCacheRange()` combining `dcbf` + `icbi` per cache line with trailing `sync` + `isync`. Both `DCFlushRange()` and `ICInvalidateRange()` now call this function.
+1. **`Recomp-Cache.c:13-30`** — Created `FlushCacheRange()` combining `dcbf` + `sync` + `icbi` per cache line with trailing `isync`. Both `DCFlushRange()` and `ICInvalidateRange()` now call this function.
 
 2. **`MIPS-to-PPC.c:genCallDynaMem()`** — Replaced `emit_64bit_call()` + `bctrl` with wrapper that stores args to `dyna_canary[40..45]` + `ld r0,20(r1)`/`mtlr r0`/`blr` to return to dispatcher.
 
