@@ -1558,8 +1558,7 @@ void SettingsDialog::on_KeybindButton_Clicked(KeybindButton* button)
 
 void SettingsDialog::on_coreCpuEmulatorComboBox_currentIndexChanged(int index)
 {
-    // hide PIF ROM options when using dynamic recompiler
-    // because the dynarec crashes when using a PIF ROM
+    // PIF ROM options visible for all CPU modes (dynarec PIF bugs fixed)
     this->usePifRomGroupBox->setVisible(index != 2);
 }
 

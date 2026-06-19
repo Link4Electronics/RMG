@@ -93,18 +93,10 @@ static void apply_pif_rom_settings(void)
     CoreRomHeader romHeader;
     std::string error;
     m64p_error ret;
-    int cpuEmulator;
     bool usePifROM;
 
     // when we fail to retrieve the rom settings, return
     if (!CoreGetCurrentRomHeader(romHeader))
-    {
-        return;
-    }
-
-    // when we're using the dynarec, return
-    cpuEmulator = CoreSettingsGetIntValue(SettingsID::Core_CPU_Emulator);
-    if (cpuEmulator >= 2)
     {
         return;
     }

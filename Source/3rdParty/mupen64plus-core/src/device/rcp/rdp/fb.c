@@ -198,9 +198,9 @@ void protect_framebuffers(struct fb* fb)
     if (!(gfx.fBGetFrameBufferInfo && gfx.fBRead && gfx.fBWrite))
         return;
 
-    /* Dynarecs (x86/ARM) may bypass memory handlers in compiled code and miss FBInfo read/writes.
-     * PPC dynarec always goes through C memory handlers, so it can use FBInfo safely. */
-#ifndef PPC_DYNAREC
+    /* Old recomp (x86/ARM) may bypass memory handlers in compiled code and miss FBInfo read/writes.
+     * New dynarec always goes through C memory handlers, so it can use FBInfo safely. */
+#if !defined(NEW_DYNAREC)
     if (fb->r4300->emumode == EMUMODE_DYNAREC)
         return;
 #endif
@@ -233,7 +233,7 @@ void protect_framebuffers(struct fb* fb)
         /* disable dynarec "fast memory" code generation to avoid direct memory accesses */
         if (fb->once) {
             fb->once = 0;
-#if !defined(NEW_DYNAREC) && !defined(PPC_DYNAREC)
+#if !defined(NEW_DYNAREC)
             fb->r4300->recomp.fast_memory = 0;
 #endif
 

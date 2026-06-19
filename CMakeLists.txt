@@ -2,6 +2,7 @@
 # Rosalie's Mupen GUI CMakeLists.txt
 #
 cmake_minimum_required(VERSION 3.15)
+cmake_policy(SET CMP0177 NEW)
 
 option(PORTABLE_INSTALL "Portable Installation" ON)
 option(UPDATER          "Enables updater" ${WIN32})
@@ -12,10 +13,56 @@ option(VRU              "Enables VRU support in RMG-Input" ON)
 option(USE_CCACHE       "Enables usage of ccache when ccache has been found" ON)
 option(NO_ASM           "Disables the usage of assembly in the mupen64plus-core" OFF)
 option(USE_ANGRYLION    "Enables building angrylion-rdp-plus which uses a non-GPL compliant license" OFF)
-option(PPC_DYNAREC      "Enables PowerPC64 MIPS-to-PPC dynamic recompiler" OFF)
+option(POWERPC64_DYNAREC "Enables PowerPC64 new dynamic recompiler (ppc64)" OFF)
 option(DYNAREC          "Enables dynamic recompiler (auto-detected for supported architectures)" OFF)
 
 project(RMG)
+
+# Auto-detect PPC64 big-endian
+# Tries several methods: CMAKE_SYSTEM_PROCESSOR, compiler target, and preprocessor
+include(CheckCSourceCompiles)
+set(_POWERPC64_DYNAREC_DEFAULT OFF)
+message(STATUS "Host processor: ${CMAKE_SYSTEM_PROCESSOR}")
+
+# Method 1: CMAKE_SYSTEM_PROCESSOR from uname (reliable for native builds)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(powerpc|ppc)64$")
+    message(STATUS "Detected PPC64 via CMAKE_SYSTEM_PROCESSOR")
+    set(_POWERPC64_DYNAREC_DEFAULT ON)
+endif()
+
+# Method 2: CMAKE_C_COMPILER_TARGET from toolchain (reliable for cross-compilation)
+# Exclude "le" suffix to avoid enabling for PPC64LE
+if(NOT _POWERPC64_DYNAREC_DEFAULT AND CMAKE_C_COMPILER_TARGET MATCHES "powerpc64|ppc64")
+    if(NOT CMAKE_C_COMPILER_TARGET MATCHES "le$")
+        message(STATUS "Detected PPC64 via CMAKE_C_COMPILER_TARGET (${CMAKE_C_COMPILER_TARGET})")
+        set(_POWERPC64_DYNAREC_DEFAULT ON)
+    endif()
+endif()
+
+# Method 3: Check preprocessor defines via try_compile
+# (reliable for both native and cross-compilation with most toolchains)
+if(NOT _POWERPC64_DYNAREC_DEFAULT)
+    check_c_source_compiles("
+        #if !defined(__powerpc64__) && !defined(__ppc64__) && !defined(_ARCH_PPC64)
+        #error not ppc64
+        #endif
+        #if defined(__LITTLE_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+        #error not big-endian
+        #endif
+        int main(void) { return 0; }
+    " HAVE_PPC64_BE)
+    if(HAVE_PPC64_BE)
+        message(STATUS "Detected PPC64 big-endian via compiler preprocessor")
+        set(_POWERPC64_DYNAREC_DEFAULT ON)
+    endif()
+endif()
+
+if(_POWERPC64_DYNAREC_DEFAULT)
+    set(POWERPC64_DYNAREC ON CACHE BOOL "Enables PowerPC64 new dynamic recompiler (ppc64)" FORCE)
+    message(STATUS "POWERPC64_DYNAREC: ON (auto-detected)")
+else()
+    message(STATUS "POWERPC64_DYNAREC: OFF (not detected)")
+endif()
 
 find_package(Git)
 if (GIT_FOUND)
@@ -161,7 +208,7 @@ install(FILES ${MUPEN64PLUS_PLUGIN_RSP_HLE}
     DESTINATION ${PLUGIN_INSTALL_PATH}/RSP
     PERMISSIONS ${LIB_PERMISSIONS}
 )
-if (NOT PPC_DYNAREC)
+if (NOT POWERPC64_DYNAREC)
     install(FILES ${MUPEN64PLUS_PLUGIN_RSP_PARALLEL}
         DESTINATION ${PLUGIN_INSTALL_PATH}/RSP
         PERMISSIONS ${LIB_PERMISSIONS}

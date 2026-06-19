@@ -63,6 +63,8 @@ void recomp_dbg_block(int addr);
 #include "arm/assem_arm.h"
 #elif  NEW_DYNAREC == NEW_DYNAREC_ARM64
 #include "arm64/assem_arm64.h"
+#elif  NEW_DYNAREC == NEW_DYNAREC_PPC64
+#include "ppc64/assem_ppc64.h"
 #else
 #error Unsupported dynarec architecture
 #endif
@@ -2287,6 +2289,8 @@ static void SDR_new(int pcaddr, int count)
 #include "arm/assem_arm.c"
 #elif  NEW_DYNAREC == NEW_DYNAREC_ARM64
 #include "arm64/assem_arm64.c"
+#elif  NEW_DYNAREC == NEW_DYNAREC_PPC64
+#include "ppc64/assem_ppc64.c"
 #else
 #error Unsupported dynarec architecture
 #endif
@@ -3030,6 +3034,18 @@ void dynarec_gen_interrupt(void)
     struct r4300_core* r4300 = &g_dev.r4300;
     struct new_dynarec_hot_state* state = &r4300->new_dynarec_hot_state;
     cp0_update_count(r4300);
+#if defined(NEW_DYNAREC) && NEW_DYNAREC == NEW_DYNAREC_PPC64
+    /* Clamp next_interrupt to ensure periodic returns from compiled code.
+     * Pure-ALU PPC loops have no bypass calls; without clamping the cycle
+     * count may not reach next_interrupt for billions of cycles, locking up
+     * the UI. Keep at most ~10000 cycles ahead of current count. */
+    {
+        uint32_t real_next = r4300->cp0.next_interrupt;
+        uint32_t clamped = state->cycle_count + 10000;
+        if (clamped < real_next)
+            r4300->cp0.next_interrupt = clamped;
+    }
+#endif
     uint32_t page = ((state->cp0_regs[CP0_COUNT_REG]>>19)&0x1fc);
     unsigned int *candidate = (unsigned int *)&restore_candidate[page];
     page <<= 3;
@@ -4349,6 +4365,7 @@ static void address_generation(int i,struct regstat *i_regs,signed char entry[])
           #ifndef INTERPRET_C1LS
           load|=(opcode[i]==0x31||opcode[i]==0x35);
           #endif
+          (void)load;
           #ifndef INTERPRET_LOADLR
           load|=(opcode[i]==0x22||opcode[i]==0x26||opcode[i]==0x1a||opcode[i]==0x1b);
           #endif
@@ -4428,6 +4445,7 @@ static void address_generation(int i,struct regstat *i_regs,signed char entry[])
         #ifndef INTERPRET_C1LS
         load|=(opcode[i+1]==0x31||opcode[i+1]==0x35);
         #endif
+        (void)load;
         #ifndef INTERPRET_LOADLR
         load|=(opcode[i+1]==0x22||opcode[i+1]==0x26||opcode[i+1]==0x1a||opcode[i+1]==0x1b);
         #endif
@@ -8693,16 +8711,15 @@ void new_dynarec_init(void)
   base_addr = g_dev.r4300.extra_memory;
   base_addr_rx = base_addr;
 #else
-#if defined(WIN32)
-  DWORD dummy;
-  VirtualProtect((void*)g_dev.r4300.extra_memory, 33554432, PAGE_EXECUTE_READWRITE, &dummy);
-  base_addr = base_addr_rx = (void*)g_dev.r4300.extra_memory;
-#else
-  mprotect ((u_char *)g_dev.r4300.extra_memory, 1<<TARGET_SIZE_2,
-            PROT_READ | PROT_WRITE | PROT_EXEC);
-  base_addr = g_dev.r4300.extra_memory;
+  /* PPC64: mmap anonymous executable buffer to avoid page-size alignment issues */
+  base_addr = mmap(NULL, 1<<TARGET_SIZE_2,
+                    PROT_READ | PROT_WRITE | PROT_EXEC,
+                    MAP_PRIVATE | MAP_ANONYMOUS,
+                    -1, 0);
   base_addr_rx = base_addr;
-#endif
+  if(base_addr == MAP_FAILED) {
+    DebugMessage(M64MSG_ERROR, "mmap() failed for dynarec code buffer");
+  }
 #endif
 #endif
 
@@ -8771,6 +8788,9 @@ void new_dynarec_cleanup(void)
 
 int new_recompile_block(int addr)
 {
+#if NEW_DYNAREC == NEW_DYNAREC_PPC64
+    fprintf(stderr, "PPC64: enter new_recompile_block(0x%08X)\n", addr);
+#endif
 #if defined(RECOMPILER_DEBUG) && !defined(RECOMP_DBG)
   recomp_dbg_block(addr);
 #endif
@@ -8822,6 +8842,26 @@ int new_recompile_block(int addr)
     DebugMessage(M64MSG_ERROR, "Compile at bogus memory address: %x", (int)addr);
     exit(1);
   }
+
+#if NEW_DYNAREC == NEW_DYNAREC_PPC64
+    static int ppc64_block_count = 0;
+    static u_char *first_block_out = NULL;
+    static u_char *block_start_out = NULL;
+    ppc64_block_count++;
+    block_start_out = out;
+    if (ppc64_block_count <= 200 || (ppc64_block_count & 0x3F) == 0) {
+      fprintf(stderr, "PPC64: block #%d at 0x%08X (out=%p, source=%p)\n",
+              ppc64_block_count, addr, out, source);
+    }
+    if (ppc64_block_count == 1) {
+      first_block_out = out;
+      fprintf(stderr, "PPC64: FIRST BLOCK source MIPS instructions:\n");
+      int di;
+      for (di = 0; di < 20 && source[di] != 0; di++) {
+        fprintf(stderr, "  [%d] 0x%08X\n", di, source[di]);
+      }
+    }
+#endif
 
   /* Pass 1: disassemble */
   /* Pass 2: register dependencies, branch targets */
@@ -11899,5 +11939,34 @@ int new_recompile_block(int addr)
     }
     expirep=(expirep+1)&65535;
   }
+#if NEW_DYNAREC == NEW_DYNAREC_PPC64
+    static int ppc64_did_first_dump = 0;
+    if (ppc64_block_count == 1 && !ppc64_did_first_dump) {
+      ppc64_did_first_dump = 1;
+      int dump_words = (out - first_block_out) / 4;
+      if (dump_words > 64) dump_words = 64;
+      fprintf(stderr, "PPC64: FIRST BLOCK compiled %d PPC instructions (%d bytes):\n",
+              dump_words, dump_words * 4);
+      u_int *pp = (u_int *)first_block_out;
+      int di;
+      for (di = 0; di < dump_words; di++) {
+        fprintf(stderr, "  [%d] 0x%08X\n", di, pp[di]);
+      }
+    }
+    if (ppc64_block_count <= 30) {
+      u_char *saved_out = block_start_out;
+      int nw = (out - saved_out) / 4;
+      if (nw > 0) {
+        fprintf(stderr, "PPC64: block #%d at %p compiled %d PPC instructions:\n",
+                ppc64_block_count, saved_out, nw);
+        u_int *pp = (u_int *)saved_out;
+        int di;
+        if (nw > 64) nw = 64;
+        for (di = 0; di < nw; di++) {
+          fprintf(stderr, "  [%d] 0x%08X\n", di, pp[di]);
+        }
+      }
+    }
+#endif
   return 0;
 }

@@ -35,9 +35,6 @@
 
 #include "recomp_types.h" /* for precomp_instr, regcache_state */
 
-#ifdef PPC_DYNAREC
-#include "ppc/ppc_dynarec.h"
-#endif
 #include "new_dynarec/new_dynarec.h"
 
 #include "osal/preproc.h"
@@ -101,7 +98,7 @@ struct r4300_core
      * XXX: more work is needed to correctly encapsulate these */
     struct cached_interp cached_interp;
 
-#if !defined(NEW_DYNAREC) && !defined(PPC_DYNAREC)
+#if !defined(NEW_DYNAREC)
     /* from recomp.c.
      * XXX: more work is needed to correctly encapsulate these */
     struct recomp {
@@ -180,13 +177,13 @@ struct r4300_core
         uint32_t wword;
         uint64_t wdword;
     } recomp;
-#elif defined(NEW_DYNAREC)
+#else
     /* FIXME: better put that near linkage_arm code
      * to help generate call beyond the +/-32MB range.
      */
     ALIGN(4096, char extra_memory[33554432]);
     struct new_dynarec_hot_state new_dynarec_hot_state;
-#endif /* NEW_DYNAREC / PPC_DYNAREC */
+#endif /* !NEW_DYNAREC */
 
     unsigned int emumode;
 

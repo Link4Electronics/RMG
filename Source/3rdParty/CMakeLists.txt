@@ -81,7 +81,7 @@ ExternalProject_Add(mupen64plus-core
         SRCDIR=${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-core/src 
         SUBDIR=${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-core/subprojects 
         OSD=0 NEW_DYNAREC=1 NO_ASM=$<BOOL:${NO_ASM}> 
-        PPC_DYNAREC=$<BOOL:${PPC_DYNAREC}> ${PPC_MAKE_FLAGS}
+        DYNAREC=$<IF:$<BOOL:${POWERPC64_DYNAREC}>,ppc64,> ${PPC_MAKE_FLAGS}
         KEYBINDINGS=0 ACCURATE_FPU=1 VULKAN=0 NETPLAY=$<BOOL:${NETPLAY}> 
         TARGET=${CORE_FILE} DEBUG=${MAKE_DEBUG}
         CC=${MAKE_CC_COMPILER} CXX=${MAKE_CXX_COMPILER}
@@ -100,8 +100,11 @@ ExternalProject_Add(mupen64plus-core
 set(APIDIR "${CMAKE_SOURCE_DIR}/Source/3rdParty/mupen64plus-core/src/api")
 
 # When cross-compiling for PPC64, override Makefile's arch auto-detection
-if (PPC_DYNAREC)
+# When cross-compiling for PPC64, override Makefile's arch auto-detection
+if (POWERPC64_DYNAREC)
     set(PPC_MAKE_FLAGS HOST_CPU=powerpc64 BIG_ENDIAN=1)
+else()
+    set(PPC_MAKE_FLAGS "")
 endif()
 
 ExternalProject_Add(mupen64plus-rsp-cxd4
@@ -141,7 +144,7 @@ ExternalProject_Add(mupen64plus-rsp-hle
 )
 
 # rsp-parallel uses unconditional SSE2 intrinsics and cannot compile on PPC
-if (NOT PPC_DYNAREC)
+if (NOT POWERPC64_DYNAREC)
     ExternalProject_Add(mupen64plus-rsp-parallel
         SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/mupen64plus-rsp-parallel/
 
@@ -288,7 +291,7 @@ set(MUPEN64PLUS_PLUGIN_RSP_CXD4 ${BUILD_BYPRODUCTS} PARENT_SCOPE)
 ExternalProject_Get_property(mupen64plus-rsp-hle BUILD_BYPRODUCTS)
 set(MUPEN64PLUS_PLUGIN_RSP_HLE ${BUILD_BYPRODUCTS} PARENT_SCOPE)
 
-if (NOT PPC_DYNAREC)
+if (NOT POWERPC64_DYNAREC)
     ExternalProject_Get_property(mupen64plus-rsp-parallel BUILD_BYPRODUCTS)
     set(MUPEN64PLUS_PLUGIN_RSP_PARALLEL ${BUILD_BYPRODUCTS} PARENT_SCOPE)
 endif()
