@@ -708,10 +708,20 @@ bool OGLRender::RenderFlushTris()
         glGetIntegerv(GL_ACTIVE_TEXTURE, &texUnit);
         glActiveTexture(GL_TEXTURE0);
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &texName);
+        uint32 omL = gRDP.otherModeL;
+        uint32 omH = gRDP.otherModeH;
+        uint32 cycle_type = (omH >> 20) & 0x3; // bits 21-20 of otherModeH
         fprintf(stderr, "RICE: RenderFlushTris #%d prog=%u tex0=%u curTile=%u numVerts=%u\n",
             rt_cnt, dbg_prog, texName, gRSP.curTile, gRSP.numVertices);
-        fprintf(stderr, "RICE:   oglVtxColors[0..3] = %02X %02X %02X %02X\n",
-            g_oglVtxColors[0][0], g_oglVtxColors[0][1], g_oglVtxColors[0][2], g_oglVtxColors[0][3]);
+        fprintf(stderr, "RICE:   otherModeH=0x%08X L=0x%08X cycle=%u\n",
+            omH, omL, cycle_type);
+        if (rt_cnt == 1 && dbg_prog > 0) {
+            // Print fragment shader program info
+            fprintf(stderr, "RICE:   prog=%u in use\n", dbg_prog);
+        }
+        uint32 fillCol = gRDP.fillColor;
+        fprintf(stderr, "RICE:   oglVtxColors[0..3] = %02X %02X %02X %02X  fillColor=0x%08X\n",
+            g_oglVtxColors[0][0], g_oglVtxColors[0][1], g_oglVtxColors[0][2], g_oglVtxColors[0][3], fillCol);
         if (g_textures[gRSP.curTile].m_pCOGLTexture) {
             fprintf(stderr, "RICE:   g_textures[%u].m_dwTextureName=%u\n",
                 gRSP.curTile, g_textures[gRSP.curTile].m_pCOGLTexture->m_dwTextureName);
@@ -744,12 +754,15 @@ bool OGLRender::RenderFlushTris()
 
     { static int px_cnt = 0; if (++px_cnt <= 8) {
         GLint vp[4]; glGetIntegerv(GL_VIEWPORT, vp);
-        GLubyte pix[4];
+        GLubyte pix[4]; GLuint pix32;
         GLint cx = vp[0] + vp[2]/2;
         GLint cy = vp[1] + vp[3]/2;
         glReadPixels(cx, cy, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pix);
         fprintf(stderr, "RICE:   post-draw pixel at viewport center (%d,%d) = (%d,%d,%d,%d)\n",
             cx, cy, pix[0], pix[1], pix[2], pix[3]);
+        // verify with GL_RGBA+GL_UNSIGNED_INT_8_8_8_8 (reads native uint32 on BE)
+        glReadPixels(cx, cy, 1, 1, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, &pix32);
+        fprintf(stderr, "RICE:   post-draw (RGBA+UI8888) = 0x%08X\n", pix32);
         // also read at (335,116) for comparison
         glReadPixels(335, 116, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pix);
         fprintf(stderr, "RICE:   post-draw pixel at (335,116) = (%d,%d,%d,%d)\n",
