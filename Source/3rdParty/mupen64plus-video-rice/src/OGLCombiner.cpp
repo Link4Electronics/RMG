@@ -1243,7 +1243,7 @@ void COGLColorCombiner::GenerateCombinerSetting()
 
     glEnableVertexAttribArray(VS_COLOR);
     OPENGL_CHECK_ERRORS;
-    glVertexAttribPointer(VS_COLOR, 4, GL_UNSIGNED_BYTE,GL_TRUE, sizeof(uint8)*4, &(g_oglVtxColors[0][0]) );
+    glVertexAttribPointer(VS_COLOR, 4, GL_UNSIGNED_INT_8_8_8_8_REV,GL_TRUE, sizeof(uint8)*4, &(g_oglVtxColors[0][0]) );
     OPENGL_CHECK_ERRORS;
 
     glEnableVertexAttribArray(VS_FOG);
