@@ -68,16 +68,10 @@ COGLTexture::COGLTexture(uint32 dwWidth, uint32 dwHeight, TextureUsage usage) :
     };
 
     #ifndef USE_GLES
-//#if defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
-//    m_glFmt = GL_BGRA;
-//    m_glType = GL_UNSIGNED_BYTE;
-//#else
     m_glFmt = GL_BGRA;
     m_glType = GL_UNSIGNED_INT_8_8_8_8_REV;
-//#endif
     #else
     m_glInternalFmt = m_glFmt = COGLGraphicsContext::Get()->IsSupportTextureFormatBGRA() ? GL_BGRA_EXT : GL_RGBA;
-//    m_glType = GL_UNSIGNED_BYTE;
     m_glType = GL_UNSIGNED_INT_8_8_8_8_REV;
     #endif
 
@@ -141,23 +135,10 @@ void COGLTexture::EndUpdate(DrawInfo *di)
 #endif
     }
 
-    // Copy the image data from main memory to video card texture memory
-    // On little-endian systems (x86 and many others), ARGB datas send in BGRA order
-    // and RGBA datas are send as ABGR (something we try to avoid).
-#if defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
-    // On BE, COLOR_RGBA bytes are [AA, RR, GG, BB]. GL_BGRA + UNSIGNED_BYTE expects
-    // [BB, GG, RR, AA] where byte[0]=B, byte[1]=G, byte[2]=R, byte[3]=A.
-    // Swap each pixel in-place to match the expected byte order.
-    uint32 *pix = (uint32*)m_pTexture;
-    uint32 count = m_dwCreatedTextureWidth * m_dwCreatedTextureHeight;
-    for (uint32 i = 0; i < count; i++) {
-        uint32 v = pix[i];
-        pix[i] = ((v & 0x000000FF) << 24)   // BB → MSB
-               | ((v & 0x0000FF00) << 8)    // GG → bits 23-16
-               | ((v & 0x00FF0000) >> 8)    // RR → bits 15-8
-               | ((v & 0xFF000000) >> 24);  // AA → LSB
-    }
-#endif
+    // GL_UNSIGNED_INT_8_8_8_8_REV is endian-agnostic: reads a native uint32,
+    // places first component (B from GL_BGRA) in the least significant byte.
+    // On both LE and BE, the 32-bit word 0xAARRGGBB is correctly decoded as
+    // B=BB, G=GG, R=RR, A=AA. No pre-swap needed.
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_dwCreatedTextureWidth, m_dwCreatedTextureHeight, m_glFmt, m_glType, m_pTexture);
     OPENGL_CHECK_ERRORS;
 

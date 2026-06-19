@@ -1914,11 +1914,12 @@ void FrameBufferManager::CopyBufferToRDRAM(uint32 addr, uint32 fmt, uint32 siz, 
 
                 for( uint32 j=0; j<width; j++ )
                 {
-                    // Point
-                    uint8 r = pS0[indexes[j]+2];
-                    uint8 g = pS0[indexes[j]+1];
-                    uint8 b = pS0[indexes[j]+0];
-                    uint8 a = pS0[indexes[j]+3];
+                    // Point — read native 0xAARRGGBB uint32, extract via bit shifts (endian-safe)
+                    uint32 pixel = ((uint32*)pS0)[indexes[j] / 4];
+                    uint8 r = (pixel >> 16) & 0xFF;
+                    uint8 g = (pixel >> 8) & 0xFF;
+                    uint8 b = pixel & 0xFF;
+                    uint8 a = (pixel >> 24) & 0xFF;
 
                     // Liner
                     *(pD+(j^N64_XOR(1))) = ConvertRGBATo555( r, g, b, a);
@@ -1946,10 +1947,11 @@ void FrameBufferManager::CopyBufferToRDRAM(uint32 addr, uint32 fmt, uint32 siz, 
                 for( uint32 j=0; j<width; j++ )
                 {
                     int pos = 4*(j*bufWidth/width);
-                    tempword = ConvertRGBATo555((pS[pos+2]),        // Red
-                                                (pS[pos+1]),        // Green
-                                                (pS[pos+0]),        // Blue
-                                                (pS[pos+3]));       // Alpha
+                    uint32 pixel = *(uint32*)&pS[pos];              // native 0xAARRGGBB
+                    tempword = ConvertRGBATo555((pixel >> 16) & 0xFF,  // Red
+                                                (pixel >> 8) & 0xFF,   // Green
+                                                pixel & 0xFF,          // Blue
+                                                (pixel >> 24) & 0xFF); // Alpha
                     
                     //*pD = CIFindIndex(tempword);
                     *(pD+(j^N64_XOR(3))) = RevTlutTable[tempword];
@@ -1980,10 +1982,11 @@ void FrameBufferManager::CopyBufferToRDRAM(uint32 addr, uint32 fmt, uint32 siz, 
 
                 for( uint32 j=0; j<width; j++ )
                 {
-                    // Point
-                    uint32 r = pS0[indexes[j]+2];
-                    uint32 g = pS0[indexes[j]+1];
-                    uint32 b = pS0[indexes[j]+0];
+                    // Point — read native 0xAARRGGBB uint32, extract via bit shifts (endian-safe)
+                    uint32 pixel = ((uint32*)pS0)[indexes[j] / 4];
+                    uint32 r = (pixel >> 16) & 0xFF;
+                    uint32 g = (pixel >> 8) & 0xFF;
+                    uint32 b = pixel & 0xFF;
 
                     // Liner
                     *(pD+(j^N64_XOR(3))) = (uint8)((r+b+g)/3);
