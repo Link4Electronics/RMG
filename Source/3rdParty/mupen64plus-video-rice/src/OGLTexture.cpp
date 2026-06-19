@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "GraphicsContext.h"
 #include "OGLDebug.h"
 #include "OGLGraphicsContext.h"
-#include <cstdio>
 #include "OGLTexture.h"
 #include "TextureManager.h"
 #include "osal_opengl.h"

@@ -429,11 +429,7 @@ static void ReadConfiguration(void)
     defaultRomOptions.N64FrameBufferEmuType = ConfigGetParamInt(l_ConfigVideoRice, "FrameBufferSetting");
     defaultRomOptions.N64FrameBufferWriteBackControl = ConfigGetParamInt(l_ConfigVideoRice, "FrameBufferWriteBackControl");
     defaultRomOptions.N64RenderToTextureEmuType = ConfigGetParamInt(l_ConfigVideoRice, "RenderToTexture");
-    fprintf(stderr, "RICE: l_ConfigVideoRice handle=%p calling ConfigGetParamInt\n", (void*)l_ConfigVideoRice);
     defaultRomOptions.screenUpdateSetting = ConfigGetParamInt(l_ConfigVideoRice, "ScreenUpdateSetting");
-    fprintf(stderr, "RICE: defaultRomOptions.screenUpdateSetting=%d (from ConfigGetParamInt)\n", defaultRomOptions.screenUpdateSetting);
-    { int tmp = -1; ConfigGetParameter(l_ConfigVideoRice, "ScreenUpdateSetting", M64TYPE_INT, &tmp, sizeof(int));
-      fprintf(stderr, "RICE: ConfigGetParameter ScreenUpdateSetting=%d\n", tmp); }
 
     defaultRomOptions.bNormalBlender = ConfigGetParamBool(l_ConfigVideoRice, "NormalAlphaBlender");
     defaultRomOptions.bFastTexCRC = ConfigGetParamBool(l_ConfigVideoRice, "FastTextureLoading");
@@ -675,8 +671,6 @@ void GenerateCurrentRomOptions()
         if( currentRomOptions.screenUpdateSetting == 0 )
             currentRomOptions.screenUpdateSetting = SCREEN_UPDATE_AT_VI_UPDATE;
     }
-    fprintf(stderr, "RICE: GenerateCurrentRomOptions final screenUpdateSetting=%d (default=%d g_curRomInfo.dwScreenUpdateSetting=%d)\n",
-        currentRomOptions.screenUpdateSetting, defaultRomOptions.screenUpdateSetting, g_curRomInfo.dwScreenUpdateSetting);
     if( currentRomOptions.bNormalCombiner == 0 )            currentRomOptions.bNormalCombiner = defaultRomOptions.bNormalCombiner;
     else currentRomOptions.bNormalCombiner--;
     if( currentRomOptions.bNormalBlender == 0 )             currentRomOptions.bNormalBlender = defaultRomOptions.bNormalBlender;

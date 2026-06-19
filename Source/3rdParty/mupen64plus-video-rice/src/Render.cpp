@@ -640,7 +640,7 @@ bool CRender::TexRect(int nX0, int nY0, int nX1, int nY1, float fS0, float fT0, 
     if( gRDP.otherMode.cycle_type  >= CYCLE_TYPE_COPY || !gRDP.otherMode.z_cmp )
     {
         ZBufferEnable(FALSE);
-        { static int zcz=0; if (++zcz<=100000) fprintf(stderr, "ZBUF_DISABLE_PRETEX: ctype=%d zcmp=%d cycletype=%d\n", gRDP.otherMode.cycle_type, gRDP.otherMode.z_cmp, gRDP.otherMode.cycle_type); }
+        { static int zcz=0; if (++zcz<=100) fprintf(stderr, "ZBUF_DISABLE_PRETEX: ctype=%d zcmp=%d cycletype=%d\n", gRDP.otherMode.cycle_type, gRDP.otherMode.z_cmp, gRDP.otherMode.cycle_type); }
     }
 
     BOOL accurate = currentRomOptions.bAccurateTextureMapping;
@@ -739,7 +739,7 @@ bool CRender::TexRect(int nX0, int nY0, int nX1, int nY1, float fS0, float fT0, 
         depth -= 0.02f;
     }
 
-    { static int txD = 0; if (++txD <= 100000) fprintf(stderr, "TEXRECT: xy=(%d,%d)-(%d,%d) tex=%ux%u depth=%.4f zcmp=%d zupd=%d dsrc=%d ctype=%u\n", nX0, nY0, nX1, nY1, g_textures[gRSP.curTile].m_dwTileWidth, g_textures[gRSP.curTile].m_dwTileHeight, depth, gRDP.otherMode.z_cmp, gRDP.otherMode.z_upd, gRDP.otherMode.depth_source, gRDP.otherMode.cycle_type); }
+    { static int txD = 0; if (++txD <= 100) fprintf(stderr, "TEXRECT: xy=(%d,%d)-(%d,%d) tex=%ux%u depth=%.4f zcmp=%d zupd=%d dsrc=%d ctype=%u\n", nX0, nY0, nX1, nY1, g_textures[gRSP.curTile].m_dwTileWidth, g_textures[gRSP.curTile].m_dwTileHeight, depth, gRDP.otherMode.z_cmp, gRDP.otherMode.z_upd, gRDP.otherMode.depth_source, gRDP.otherMode.cycle_type); }
 
     g_texRectTVtx[0].z = g_texRectTVtx[1].z = g_texRectTVtx[2].z = g_texRectTVtx[3].z = depth;
     g_texRectTVtx[0].rhw = g_texRectTVtx[1].rhw = g_texRectTVtx[2].rhw = g_texRectTVtx[3].rhw = 1;
@@ -881,7 +881,7 @@ bool CRender::TexRectFlip(int nX0, int nY0, int nX1, int nY1, float fS0, float f
 
     float depth = (gRDP.otherMode.depth_source == 1 ? gRDP.fPrimitiveDepth : 0 );
 
-    { static int txF = 0; if (++txF <= 100000) fprintf(stderr, "TEXRECTFLIP: xy=(%d,%d)-(%d,%d) tex=%ux%u depth=%.4f zcmp=%d zupd=%d dsrc=%d ctype=%u\n", nX0, nY0, nX1, nY1, g_textures[gRSP.curTile].m_dwTileWidth, g_textures[gRSP.curTile].m_dwTileHeight, depth, gRDP.otherMode.z_cmp, gRDP.otherMode.z_upd, gRDP.otherMode.depth_source, gRDP.otherMode.cycle_type); }
+    { static int txF = 0; if (++txF <= 100) fprintf(stderr, "TEXRECTFLIP: xy=(%d,%d)-(%d,%d) tex=%ux%u depth=%.4f zcmp=%d zupd=%d dsrc=%d ctype=%u\n", nX0, nY0, nX1, nY1, g_textures[gRSP.curTile].m_dwTileWidth, g_textures[gRSP.curTile].m_dwTileHeight, depth, gRDP.otherMode.z_cmp, gRDP.otherMode.z_upd, gRDP.otherMode.depth_source, gRDP.otherMode.cycle_type); }
 
     if( t0u0 >= 0 && t0u1 <= 1 && t0u1 >= t0u0 ) SetTextureUFlag(TEXTURE_UV_FLAG_CLAMP, gRSP.curTile);
     if( t0v0 >= 0 && t0v1 <= 1 && t0v1 >= t0v0 ) SetTextureVFlag(TEXTURE_UV_FLAG_CLAMP, gRSP.curTile);

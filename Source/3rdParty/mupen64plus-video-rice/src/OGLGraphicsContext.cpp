@@ -132,7 +132,6 @@ bool COGLGraphicsContext::Initialize(uint32 dwWidth, uint32 dwHeight, BOOL bWind
 #ifndef USE_GLES
     /* Get function pointers to OpenGL extensions (blame Microsoft Windows for this) */
     OGLExtensions_Init();
-    { GLenum e = glGetError(); if (e != GL_NO_ERROR) fprintf(stderr, "RICE: after OGLExtensions_Init glError=0x%04X\n", e); }
 #endif
 
     char caption[500];
@@ -156,14 +155,10 @@ bool COGLGraphicsContext::Initialize(uint32 dwWidth, uint32 dwHeight, BOOL bWind
 
     DebugMessage(M64MSG_INFO, "Using OpenGL: %.60s - %.128s : %.60s", renderStr, versionStr, vendorStr);
     { GLint db=0; glGetIntegerv(GL_DEPTH_BITS, &db); fprintf(stderr, "GL_DEPTH_BITS=%d\n", (int)db); }
-    fprintf(stderr, "RICE: OpenGL renderer=%s version=%s vendor=%s\n", renderStr, versionStr, vendorStr);
 
     InitLimits();
-    { GLenum e = glGetError(); if (e != GL_NO_ERROR) fprintf(stderr, "RICE: after InitLimits glError=0x%04X\n", e); }
     InitState();
-    { GLenum e = glGetError(); if (e != GL_NO_ERROR) fprintf(stderr, "RICE: after InitState glError=0x%04X\n", e); }
     InitOGLExtension();
-    { GLenum e = glGetError(); if (e != GL_NO_ERROR) fprintf(stderr, "RICE: after InitOGLExtension glError=0x%04X\n", e); }
 
     Unlock();
 
@@ -228,7 +223,6 @@ bool COGLGraphicsContext::ResizeInitialize(uint32 dwWidth, uint32 dwHeight, BOOL
 
     /* Drain stale GL errors from context creation (common on older ATI drivers) */
     { GLenum e; do { e = glGetError(); } while (e != GL_NO_ERROR); }
-    fprintf(stderr, "RICE: GL errors drained after context creation\n");
 
     InitState();
     Unlock();

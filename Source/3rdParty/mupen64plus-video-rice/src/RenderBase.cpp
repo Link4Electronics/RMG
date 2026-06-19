@@ -1443,7 +1443,7 @@ void ProcessVertexDataNoSSE(uint32 dwAddr, uint32 dwV0, uint32 dwNum)
                 g_fFogCoord[i] = gRSPfFogMin;
         }
 
-        { static int zv=0; if (++zv<=1000) fprintf(stderr, "VTX: i=%d raw=(%d,%d,%d,%d) clip=(%.2f,%.2f,%.8f,%.2f) ndc=(%.4f,%.4f,%.8f,%.4f)\n", i, vert.x, vert.y, vert.z, vert.flag, g_vtxTransformed[i].x, g_vtxTransformed[i].y, g_vtxTransformed[i].z, g_vtxTransformed[i].w, g_vecProjected[i].x, g_vecProjected[i].y, g_vecProjected[i].z, g_vecProjected[i].w); }
+        { static int zv=0; if (++zv<=10) fprintf(stderr, "VTX: i=%d raw=(%d,%d,%d,%d) clip=(%.2f,%.2f,%.8f,%.2f) ndc=(%.4f,%.4f,%.8f,%.4f)\n", i, vert.x, vert.y, vert.z, vert.flag, g_vtxTransformed[i].x, g_vtxTransformed[i].y, g_vtxTransformed[i].z, g_vtxTransformed[i].w, g_vecProjected[i].x, g_vecProjected[i].y, g_vecProjected[i].z, g_vecProjected[i].w); }
 
         VTX_DUMP( 
         {
@@ -1566,13 +1566,13 @@ bool IsTriangleVisible(uint32 dwV0, uint32 dwV1, uint32 dwV2)
             if (fDirection < 0 && gRSP.bCullBack)
             {
                 status.dwNumTrisClipped++;
-                { static int tcl=0; if (++tcl<=100000) fprintf(stderr, "CULL_BACK: v0=%u v1=%u v2=%u dir=%.4f\n", dwV0, dwV1, dwV2, fDirection); }
+                { static int tcl=0; if (++tcl<=100) fprintf(stderr, "CULL_BACK: v0=%u v1=%u v2=%u dir=%.4f\n", dwV0, dwV1, dwV2, fDirection); }
                 return false;
             }
             else if (fDirection > 0 && gRSP.bCullFront)
             {
                 status.dwNumTrisClipped++;
-                { static int tcf=0; if (++tcf<=100000) fprintf(stderr, "CULL_FRONT: v0=%u v1=%u v2=%u dir=%.4f\n", dwV0, dwV1, dwV2, fDirection); }
+                { static int tcf=0; if (++tcf<=100) fprintf(stderr, "CULL_FRONT: v0=%u v1=%u v2=%u dir=%.4f\n", dwV0, dwV1, dwV2, fDirection); }
                 return false;
             }
         }

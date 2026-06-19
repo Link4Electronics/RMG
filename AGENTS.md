@@ -530,6 +530,61 @@ Changed `$(warning ...)` to `$(info ...)` with "supported by RMG" for PPC blocks
 
 ## Current focus
 
+**Rice video plugin — Shadow CI4 texture investigation + GL_UNSIGNED_BYTE vs GL_UNSIGNED_INT_8_8_8_8_REV (Jun 19).**
+
+### Shadow rendering investigation
+
+SM64 shadow (dark circle under Mario) uses a CI4 texture. The shadow renders as black/invisible due to palette issues. Key diagnostic queries for stderr output:
+
+| Symptom | Grep | What to look for |
+|---------|------|-----------------|
+| CI texture tile info | `TILE: fmt=0 sz=0` | `fmt=0 sz=0` = CI4, `sz=2` = CI16. Note `TLutFmt` value and `pal` (palette bank) |
+| Palette interpretation | `TLUT_FMT=` | `RGBA16` vs `IA16`. If `IA16` but forced to `RGBA16` at `RDP_Texture.h:1100-1101`, palette colors are wrong |
+| LOADTLUT fires? | `GBI_LOADTLUT:` | Shows `w0/w1` values. If no lines with this tag, `G_LOADTLUT` never fires |
+| Palette entries | `TLUT: tileno=` | Shows raw `0x%04X` entries plus interpreted `RGBA=(r,g,b,a)` or `I= A=` |
+| Vertex colors | `oglVtxColors[0..3]` | Shows `RR GG BB AA`. If channels are shifted (e.g., R reads GG or B reads AA), there's a byte-order issue in the TLITVERTEX chain |
+| Post-draw pixels | `post-draw pixel` | Shows actual RGBA output at viewport center |
+| Texture load formats | `TILE: fmt=0 sz=0` | For shadow specifically: `sz=0` means CI4 (needs palette), `TLutFmt` shows what palette format is assumed |
+| Raw texture/palette bytes | `RAW[0..15]` / `PAL[0..31]` | Raw bytes as stored in RDRAM and g_wRDPTlut |
+
+### CI4 shadow diagnostic dump
+
+Enhanced in `RDP_Texture.h:1130-1167`:
+- **CI_PAL** line: dumps 8 palette entries from `g_wRDPTlut` at the current tile's palette bank offset. Shows the actual palette data that will be used for CI texture lookup.
+- **TLUT dump** (`RDP_Texture.h:1302-1316`): now shows `TLUT_FMT=RGBA16/IA16/NONE` and interprets each palette entry as RGBA5551 or IA16 values.
+- **LOaDBLOCK/LOADTILE** diagnostics (`RDP_Texture.h:1424, 1646`): fires for CI format or TMEM>=0x100 loads, limited to 20 entries.
+
+### GL_UNSIGNED_BYTE vs GL_UNSIGNED_INT_8_8_8_8_REV
+
+On PPC64 BE, `GL_RGBA + GL_UNSIGNED_BYTE` for `glReadPixels` reads bytes in memory order: `[AA, RR, GG, BB]` from a native `0xAARRGGBB` framebuffer. This produces wrong RGBA output (R=AA, G=RR, B=GG, A=BB). The correct format for BE is `GL_BGRA + GL_UNSIGNED_INT_8_8_8_8_REV` or `GL_RGBA + GL_UNSIGNED_INT_8_8_8_8`, which reads the native uint32 and maps components correctly.
+
+For **texture upload** (`OGLTexture.cpp`): currently uses `GL_BGRA + GL_UNSIGNED_INT_8_8_8_8_REV` which IS endian-agnostic — reads the uint32 `0xAARRGGBB` and maps B=byte3=BB, G=byte2=GG, R=byte1=RR, A=byte0=AA correctly on both LE and BE.
+
+For **vertex colors** (`glVertexAttribPointer` with `GL_UNSIGNED_BYTE`): this is correct on BE because vertex colors are stored as separate bytes `[R, G, B, A]` in `g_oglVtxColors[]` (set at `RenderBase.cpp:898-901`), not as a packed uint32. Each byte maps to its component directly.
+
+### Debug printf cleanup (Jun 19)
+
+Reduced diagnostic limits across Rice plugin to reduce stderr spam:
+
+| File | Change |
+|------|--------|
+| `Config.cpp:432-436` | Removed 3 config-reading debug fprintf calls (no longer needed) |
+| `Config.cpp:678-679` | Removed GenerateCurrentRomOptions debug fprintf |
+| `Render.cpp:643` | ZBUF_DISABLE limit 100000→100 |
+| `Render.cpp:742` | TEXRECT limit 100000→100 |
+| `Render.cpp:884` | TEXRECTFLIP limit 100000→100 |
+| `RenderBase.cpp:875-878` | ZDBG limit 9 (unchanged, useful) |
+| `RenderBase.cpp:1385-1397` | PROJMTX/MODVMTX limit 2 (unchanged, useful) |
+| `RenderBase.cpp:1446` | VTX dump limit 1000→10 |
+| `RenderBase.cpp:1569,1575` | CULL_BACK/CULL_FRONT limit 100000→100 |
+| `RDP_Texture.h:1130` | TILE dump limit 1000→100 |
+| `OGLGraphicsContext.cpp:135` | Removed `after OGLExtensions_Init glError` |
+| `OGLGraphicsContext.cpp:159` | Removed duplicate renderer/version string |
+| `OGLGraphicsContext.cpp:162-166` | Removed after-Init error checks (redundant) |
+| `OGLGraphicsContext.cpp:231` | Removed "GL errors drained" message |
+| `OGLRender.cpp:703` | Removed `pre-RenderFlushTris error` check (was always-0 noise) |
+| `OGLTexture.cpp:26` | Removed `#include <cstdio>` (not used) |
+
 **PPC64 dynarec — KSEG0/KSEG1 stripping in read_rmg_word/write_rmg_word (Jun 17).**
 
 ### Bug: Pure-ALU compiled PPC blocks never return to C dispatcher (FIXED Jun 17)

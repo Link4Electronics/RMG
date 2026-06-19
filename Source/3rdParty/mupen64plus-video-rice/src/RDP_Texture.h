@@ -1127,12 +1127,12 @@ TxtrCacheEntry* LoadTexture(uint32 tileno)
         DebuggerAppendMsg("Pitch: %d, Addr: 0x%08x", gti.Pitch, gti.Address);
     });
 
-    { static int td_cnt = 0; if (++td_cnt <= 1000) {
+    { static int td_cnt = 0; if (++td_cnt <= 100) {
         fprintf(stderr,
             "TILE: tileno=%u fmt=%u sz=%u line=%u tmem=%u pal=%u "
             "mirrorS=%u mirrorT=%u maskS=%u maskT=%u shiftS=%u shiftT=%u "
             "fmt_internal=%u addr=0x%08X pitch=%u w=%u h=%u "
-            "bUseFullTMEM=%u bSetBy=%u TLutFmt=%u\n",
+            "bUseFullTMEM=%u bSetBy=%u TLutFmt=%u",
             tileno, tile.dwFormat, tile.dwSize,
             tile.dwLine, tile.dwTMem, tile.dwPalette,
             tile.bMirrorS, tile.bMirrorT,
@@ -1140,6 +1140,10 @@ TxtrCacheEntry* LoadTexture(uint32 tileno)
             gti.Format, gti.Address, gti.Pitch,
             gti.WidthToCreate, gti.HeightToCreate,
             options.bUseFullTMEM, info->bSetBy, gti.TLutFmt);
+        if (gti.Format == TXT_FMT_CI) {
+            fprintf(stderr, " tlut_int=%s", gti.TLutFmt == 2 ? "RGBA16" : gti.TLutFmt == 3 ? "IA16" : gti.TLutFmt == 0 ? "NONE" : "?");
+        }
+        fprintf(stderr, "\n");
         // dump raw texture data first 16 bytes
         uint8 *raw = (uint8*)(g_pRDRAMu8 + (gti.Address & (g_dwRamSize-1)));
         fprintf(stderr, "  RAW[0..15]:");
@@ -1152,6 +1156,16 @@ TxtrCacheEntry* LoadTexture(uint32 tileno)
         for (int ri = 0; ri < 32; ri++)
             fprintf(stderr, " %02X", praw[ri]);
         fprintf(stderr, "\n");
+        // for CI textures, dump palette entries for current tile's palette bank
+        if (gti.Format == TXT_FMT_CI) {
+            uint32 palBase = (tile.dwSize == TXT_SIZE_4b) ? tile.dwPalette * 16 : 0;
+            fprintf(stderr, "  CI_PAL[%u..%u]:", palBase, palBase + 7);
+            for (int pi = 0; pi < 8; pi++) {
+                uint16 pe = g_wRDPTlut[(palBase + pi) ^ N64_XOR(1)];
+                fprintf(stderr, " %04X", pe);
+            }
+            fprintf(stderr, "\n");
+        }
     } }
 
     // Option for faster loading tiles
@@ -1286,10 +1300,20 @@ for (uint32 i=0; i<dwCount && i<0x100; i++)
 
 // DEBUG: dump TLUT for any palette load (CI4 = 16, CI8 = 256)
     { static int tl_dump = 0; if (dwCount > 0 && ++tl_dump <= 8) {
-    fprintf(stderr, "TLUT: tileno=%u dwCount=%u dwTMEMOff=%u dwPalAddr=0x%X palBank=%u\n",
-        tileno, dwCount, dwTMEMOffset, dwPalAddress, gRDP.tiles[tileno].dwPalette);
+    uint32 tlutFmt = (gRDP.otherModeH >> RSP_SETOTHERMODE_SHIFT_TEXTLUT) & 0x3;
+    fprintf(stderr, "TLUT: tileno=%u dwCount=%u dwTMEMOff=%u dwPalAddr=0x%X palBank=%u TLUT_FMT=%s\n",
+        tileno, dwCount, dwTMEMOffset, dwPalAddress, gRDP.tiles[tileno].dwPalette,
+        tlutFmt == 2 ? "RGBA16" : tlutFmt == 3 ? "IA16" : tlutFmt == 0 ? "NONE" : "?");
     for (uint32 i = 0; i < dwCount && i < 16; i++) {
-        fprintf(stderr, "  [%2u] 0x%04X\n", i, g_wRDPTlut[(i + dwTMEMOffset) ^ N64_XOR(1)]);
+        uint16 pe = g_wRDPTlut[(i + dwTMEMOffset) ^ N64_XOR(1)];
+        fprintf(stderr, "  [%2u] 0x%04X", i, pe);
+        if (tlutFmt == 3) { // IA16: I=top 8 bits, A=bottom 8 bits
+            fprintf(stderr, " I=%u A=%u", (pe >> 8) & 0xFF, pe & 0xFF);
+        } else { // RGBA16 or NONE (default RGBA16)
+            int r5 = (pe >> 11) & 0x1F, g5 = (pe >> 6) & 0x1F, b5 = (pe >> 1) & 0x1F, a1 = pe & 0x1;
+            fprintf(stderr, " RGBA=(%u,%u,%u,%s)", r5, g5, b5, a1 ? "255" : "0");
+        }
+        fprintf(stderr, "\n");
     } } }
 
 if( options.bUseFullTMEM )

@@ -230,7 +230,6 @@ void OGLRender::ZBufferEnable(BOOL bZBuffer)
         glDepthFunc( GL_ALWAYS );
         OPENGL_CHECK_ERRORS;
     }
-    { static int zbe=0; if (++zbe<=100000) fprintf(stderr, "ZBUF_ENABLE: %d (bZBuffer=%d depthFunc=%s)\n", gRSP.bZBufferEnabled, bZBuffer, bZBuffer?"LEQUAL":"ALWAYS"); }
 }
 
 void OGLRender::ClearBuffer(bool cbuffer, bool zbuffer)
@@ -243,7 +242,6 @@ void OGLRender::ClearBuffer(bool cbuffer, bool zbuffer)
     OPENGL_CHECK_ERRORS;
     glClear(flag);
     OPENGL_CHECK_ERRORS;
-    { static int clb=0; if (++clb<=100000) fprintf(stderr, "CLEARBUF: cb=%d zb=%d fill=0x%08X depth=%.4f\n", cbuffer, zbuffer, gRDP.originalFillColor, depth); }
 }
 
 void OGLRender::ClearZBuffer(float depth)
@@ -273,7 +271,6 @@ void OGLRender::SetZCompare(BOOL bZCompare)
         glDepthFunc( GL_ALWAYS );
         OPENGL_CHECK_ERRORS;
     }
-    { static int szc=0; if (++szc<=100000) fprintf(stderr, "ZCOMPARE: %d -> %s\n", bZCompare, bZCompare?"LEQUAL":"ALWAYS"); }
 }
 
 void OGLRender::SetZUpdate(BOOL bZUpdate)
@@ -292,7 +289,6 @@ void OGLRender::SetZUpdate(BOOL bZUpdate)
         glDepthMask(GL_FALSE);
         OPENGL_CHECK_ERRORS;
     }
-    { static int szu=0; if (++szu<=100000) fprintf(stderr, "ZUPD: %d -> %s\n", bZUpdate, bZUpdate?"MASK_ON":"MASK_OFF"); }
 }
 
 void OGLRender::ApplyZBias(int bias)
@@ -574,24 +570,6 @@ bool OGLRender::RenderTexRect()
     glDisable(GL_CULL_FACE);
     OPENGL_CHECK_ERRORS;
 
-    { static int tr_cnt = 0; if (++tr_cnt <= 8) {
-        GLint texName; GLint texUnit;
-        glGetIntegerv(GL_ACTIVE_TEXTURE, &texUnit);
-        glActiveTexture(GL_TEXTURE0);
-        glGetIntegerv(GL_TEXTURE_BINDING_2D, &texName);
-        fprintf(stderr, "RICE: RenderTexRect #%d tex0=%u\n", tr_cnt, texName);
-        fprintf(stderr, "RICE:   colours[0..3]=%02X%02X%02X%02X %02X%02X%02X%02X %02X%02X%02X%02X %02X%02X%02X%02X\n",
-            g_texRectTVtx[3].r,g_texRectTVtx[3].g,g_texRectTVtx[3].b,g_texRectTVtx[3].a,
-            g_texRectTVtx[2].r,g_texRectTVtx[2].g,g_texRectTVtx[2].b,g_texRectTVtx[2].a,
-            g_texRectTVtx[1].r,g_texRectTVtx[1].g,g_texRectTVtx[1].b,g_texRectTVtx[1].a,
-            g_texRectTVtx[0].r,g_texRectTVtx[0].g,g_texRectTVtx[0].b,g_texRectTVtx[0].a);
-        if (g_textures[gRSP.curTile].m_pCOGLTexture) {
-            fprintf(stderr, "RICE:   g_textures[%u].m_dwTextureName=%u\n",
-                gRSP.curTile, g_textures[gRSP.curTile].m_pCOGLTexture->m_dwTextureName);
-        }
-        glActiveTexture((GLenum)texUnit);
-    } }
-
     GLubyte colour[] = {
             g_texRectTVtx[3].r, g_texRectTVtx[3].g, g_texRectTVtx[3].b, g_texRectTVtx[3].a,
             g_texRectTVtx[2].r, g_texRectTVtx[2].g, g_texRectTVtx[2].b, g_texRectTVtx[2].a,
@@ -721,8 +699,6 @@ extern FiddledVtx * g_pVtxBase;
 bool OGLRender::RenderFlushTris()
 {
     ApplyZBias(m_dwZBias);  // set the bias factors
-
-    { GLenum e = glGetError(); if (e != GL_NO_ERROR) fprintf(stderr, "RICE: pre-RenderFlushTris error=0x%04X\n", e); }
 
     GLint dbg_prog;
     glGetIntegerv(GL_CURRENT_PROGRAM, &dbg_prog);
