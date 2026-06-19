@@ -68,16 +68,17 @@ COGLTexture::COGLTexture(uint32 dwWidth, uint32 dwHeight, TextureUsage usage) :
     };
 
     #ifndef USE_GLES
-#if defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
-    m_glFmt = GL_BGRA;
-    m_glType = GL_UNSIGNED_BYTE;
-#else
+//#if defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+//    m_glFmt = GL_BGRA;
+//    m_glType = GL_UNSIGNED_BYTE;
+//#else
     m_glFmt = GL_BGRA;
     m_glType = GL_UNSIGNED_INT_8_8_8_8_REV;
-#endif
+//#endif
     #else
     m_glInternalFmt = m_glFmt = COGLGraphicsContext::Get()->IsSupportTextureFormatBGRA() ? GL_BGRA_EXT : GL_RGBA;
-    m_glType = GL_UNSIGNED_BYTE;
+//    m_glType = GL_UNSIGNED_BYTE;
+    m_glType = GL_UNSIGNED_INT_8_8_8_8_REV;
     #endif
 
     LOG_TEXTURE(TRACE2("New texture: (%d, %d)", dwWidth, dwHeight));
