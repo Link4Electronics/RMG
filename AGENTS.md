@@ -213,7 +213,7 @@ The generated code is **incorrect** — SM64 boots to black screen with Rice vid
 ---
 
 # Old PPC64 Dynarec
-Removed on commit a984251c, contained some things that may or may not worth porting to PPC64 new_dynarec
+Removed on commit ab38c35a, contained some things that may or may not worth porting to PPC64 new_dynarec
 
 Fastmem direct KSEG0→RDRAM — old code has RLWINM(rd,base,0,2,31); ORIS(rd,rd,0x4000) for inlined loads from KSEG0, avoiding C fallback for every memory access.
 FPU native PPC instructions — old code uses fctiwz, mtfsfi, fcmpu, stfiwx directly instead of C fallbacks. Currently our backend uses C for everything FPU.

@@ -29,11 +29,14 @@
 #define JUMP_TABLE_ENTRY_SIZE 32
 #define JUMP_TABLE_SIZE 8192
 
-/* PPC64 ELFv2 calling convention */
-#define ARG1_REG 3
-#define ARG2_REG 4
-#define ARG3_REG 5
-#define ARG4_REG 6
+/* PPC64 ELFv2 calling convention — these are HOST INDICES, not PPC register numbers.
+ * All emitters apply HREG() which translates host index → PPC number via host_reg_ppc[].
+ *   host index 0 → PPC r3, index 1 → r4, index 2 → r5, index 3 → r6
+ * On ARM64 host index == register number, but on PPC64 we need the indirection. */
+#define ARG1_REG 0
+#define ARG2_REG 1
+#define ARG3_REG 2
+#define ARG4_REG 3
 
 #define FP 31
 #define SP 1

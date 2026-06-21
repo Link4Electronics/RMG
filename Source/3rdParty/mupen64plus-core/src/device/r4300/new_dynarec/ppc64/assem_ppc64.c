@@ -275,10 +275,15 @@ static void cache_flush(char *start, char *end)
     uintptr_t addr;
     uintptr_t start_addr = (uintptr_t)start;
     uintptr_t end_addr   = (uintptr_t)end;
-    /* PPC970: dcbf + sync + icbi per cache line (combined loop) */
+    /* PPC970: sync (drain store buffer) THEN dcbf (flush D-cache to L2),
+     * THEN icbi (invalidate I-cache), then final sync+isync.
+     * The dcbf MUST see the stored instructions in D-cache, hence sync first. */
+    __asm__ volatile("sync" : : : "memory");
     for (addr = start_addr & ~63; addr < end_addr; addr += 32) {
         __asm__ volatile("dcbf 0,%0" : : "r"(addr) : "memory");
-        __asm__ volatile("sync" : : : "memory");
+    }
+    __asm__ volatile("sync" : : : "memory");
+    for (addr = start_addr & ~63; addr < end_addr; addr += 32) {
         __asm__ volatile("icbi 0,%0" : : "r"(addr) : "memory");
     }
     __asm__ volatile("sync" : : : "memory");
@@ -691,30 +696,27 @@ static void output_w64(uint64_t val)
 /* ======================================================================== */
 static void emit_movimm(int imm, int rt)
 {
-    /* Try addi rt, 0, simm (for -32768..32767) */
+    /* For signed values in [-32768, 32767], addi works directly.
+     * No zero-extension needed since the result is already correct. */
     if (imm >= -32768 && imm <= 32767) {
         if (imm != 0 || rt != 0) {
             output_w32(D_FORM(OP_ADDI, HREG(rt), 0, imm));
         }
         return;
     }
-    /* Try addis rt, 0, simm_high (for 0..65535) */
-    if (imm >= 0 && imm <= 65535) {
-        output_w32(D_FORM(OP_ADDIS, HREG(rt), 0, 0));
-        output_w32(D_FORM_HR(OP_ORI, rt, rt, imm));
+    /* For unsigned 16-bit values (0..65535), use ori (zero-extend). */
+    if ((unsigned)imm <= 0xFFFF) {
+        output_w32(D_FORM(OP_ADDI, HREG(rt), 0, 0));
+        output_w32(D_FORM_HR(OP_ORI, rt, rt, (unsigned)imm));
         return;
     }
-    /* General case: lis + ori */
-    int high = (imm >> 16) & 0xffff;
-    int low  = imm & 0xffff;
-    /* Handle sign extension of low 16 bits */
-    if (low & 0x8000) {
-        high = (high + 1) & 0xffff;
-    }
-    output_w32(D_FORM(OP_ADDIS, HREG(rt), 0, high));
-    if (low) {
-        output_w32(D_FORM_HR(OP_ORI, rt, rt, low));
-    }
+    /* General 32-bit: build with oris + ori (zero-extension avoids
+     * addis sign-extension bug when high >= 0x8000). */
+    int high = ((unsigned)imm >> 16) & 0xffff;
+    int low  = (unsigned)imm & 0xffff;
+    output_w32(D_FORM(OP_ADDI, HREG(rt), 0, 0));
+    if (high) output_w32(D_FORM_HR(OP_ORIS, rt, rt, high));
+    if (low)  output_w32(D_FORM_HR(OP_ORI, rt, rt, low));
 }
 
 /* ======================================================================== */
@@ -744,28 +746,29 @@ static void emit_movimm64(uintptr_t imm, int rt)
         return;
     }
     
-    /* Only lower 32 bits non-zero — use standard 32-bit method */
+    /* 32-bit value (upper 32 bits are zero) — use oris + ori (zero-extend) */
     if (a == 0 && b == 0) {
         if (c == 0) {
-            output_w32(D_FORM(OP_ADDI, HREG(rt), 0, (int16_t)d));
+            output_w32(D_FORM(OP_ADDI, HREG(rt), 0, 0));
+            if (d) output_w32(D_FORM_HR(OP_ORI, rt, rt, d));
         } else {
-            output_w32(D_FORM(OP_ADDIS, HREG(rt), 0, c));
+            output_w32(D_FORM(OP_ADDI, HREG(rt), 0, 0));
+            output_w32(D_FORM_HR(OP_ORIS, rt, rt, c));
             if (d) output_w32(D_FORM_HR(OP_ORI, rt, rt, d));
         }
         return;
     }
     
-    /* 64-bit constant: build upper 32 bits, shift left 32, add lower 32 bits */
-    if (a) {
-        output_w32(D_FORM(OP_ADDIS, HREG(rt), 0, a));
-        if (b) output_w32(D_FORM_HR(OP_ORI, rt, rt, b));
-    } else {
-        output_w32(D_FORM(OP_ADDI, HREG(rt), 0, 0));
-        output_w32(D_FORM_HR(OP_ORI, rt, rt, b));
-    }
+    /* 64-bit constant: build upper 32 bits in lower 32 register bits
+     * using ori/oris (zero-extension avoids addis sign-extension bug),
+     * then sldi to move to upper 32, then add lower 32 bits. */
+    output_w32(D_FORM(OP_ADDI, HREG(rt), 0, 0));
+    if (a) output_w32(D_FORM_HR(OP_ORIS, rt, rt, a));
+    if (b) output_w32(D_FORM_HR(OP_ORI, rt, rt, b));
     /* sldi rt, rt, 32 = rldicr rt, rt, 32, 31
-       MD-form: bits 21,16-20,10=sh, bits 9-5,4=me, XO=001 at bits 3-1, Rc=0 */
-    output_w32(0x78000002 | (HREG(rt) << 21) | (HREG(rt) << 16) | (1 << 10) | (31 << 5));
+       MD-form: opcd=30 | RS=rt | RA=rt | SH=32 | ME=31 | xo=1 | Rc=0
+       Base: 0x780081F2 (SH=32, ME=31) then OR'd with HREG(rt) for RS,RA */
+    output_w32(0x780081F2 | (HREG(rt) << 21) | (HREG(rt) << 16));
     if (c) output_w32(D_FORM_HR(OP_ORIS, rt, rt, c));
     if (d) output_w32(D_FORM_HR(OP_ORI, rt, rt, d));
 }
@@ -789,8 +792,13 @@ static char regname[32][4] = {
 static void emit_mov(int rs, int rt)
 {
     assem_debug("mr r%d, r%d", rt, rs);
-    /* mr rt, rs = or rt, rs, rs */
-    output_w32(XO_FORM_HR(OP_MFXSR, rs, rs, rt, XO_OR, 0));
+    /* mr rt, rs = or rt, rs, rs
+     * XO_FORM_HR: (op, RS, RA, RB, xo, rc)
+     *   RS → PPC bits 6-10 (source 1)
+     *   RA → PPC bits 11-15 (destination for or)
+     *   RB → PPC bits 16-20 (source 2)
+     * or RA={rt}, RS={rs}, RB={rs} → or rt, rs, rs → mr rt, rs → rt ← rs */
+    output_w32(XO_FORM_HR(OP_MFXSR, rs, rt, rs, XO_OR, 0));
 }
 
 static void emit_add(int rs1, int rs2, int rt)
@@ -815,19 +823,23 @@ static void emit_sub(int rs1, int rs2, int rt)
 static void emit_and(int rs1, int rs2, int rt)
 {
     assem_debug("and r%d, r%d, r%d", rt, rs1, rs2);
-    output_w32(XO_FORM_HR(OP_MFXSR, rt, rs1, rs2, XO_AND, 0));
+    /* and RA=rt, RS=rs1, RB=rs2 → rt = rs1 & rs2
+     * XO_FORM_HR: (op, RS, RA, RB, xo, rc) */
+    output_w32(XO_FORM_HR(OP_MFXSR, rs1, rt, rs2, XO_AND, 0));
 }
 
 static void emit_or(int rs1, int rs2, int rt)
 {
     assem_debug("or r%d, r%d, r%d", rt, rs1, rs2);
-    output_w32(XO_FORM_HR(OP_MFXSR, rt, rs1, rs2, XO_OR, 0));
+    /* or RA=rt, RS=rs1, RB=rs2 → rt = rs1 | rs2 */
+    output_w32(XO_FORM_HR(OP_MFXSR, rs1, rt, rs2, XO_OR, 0));
 }
 
 static void emit_xor(int rs1, int rs2, int rt)
 {
     assem_debug("xor r%d, r%d, r%d", rt, rs1, rs2);
-    output_w32(XO_FORM_HR(OP_MFXSR, rt, rs1, rs2, XO_XOR, 0));
+    /* xor RA=rt, RS=rs1, RB=rs2 → rt = rs1 ^ rs2 */
+    output_w32(XO_FORM_HR(OP_MFXSR, rs1, rt, rs2, XO_XOR, 0));
 }
 
 static void emit_neg(int rs, int rt)
@@ -840,8 +852,9 @@ static void emit_neg(int rs, int rt)
 static void emit_not(int rs, int rt)
 {
     assem_debug("nor r%d, r%d, r%d", rt, rs, rs);
-    /* nor rt, rs, rs  => rt = ~(rs | rs) = ~rs (bitwise NOT) */
-    output_w32(XO_FORM_HR(OP_MFXSR, rt, rs, rs, XO_NOR, 0));
+    /* nor rt, rs, rs => rt = ~(rs | rs) = ~rs
+     * nor RA=rt, RS=rs, RB=rs */
+    output_w32(XO_FORM_HR(OP_MFXSR, rs, rt, rs, XO_NOR, 0));
 }
 
 static void emit_slt(int rs1, int rs2, int rt)
@@ -925,8 +938,8 @@ static void emit_bne(intptr_t addr)
     intptr_t offset = addr - (intptr_t)out;
     assem_debug("bne %x", addr);
     assert(offset >= -32768LL && offset < 32768LL);
-    /* bne cr0: BO=0x10 (branch if true, z'=1), BI=cr0*4+2 (EQ bit) */
-    output_w32(B_FORM(OP_BC, 0x10, 2, (offset >> 2), 0, 0));
+    /* bne cr0: BO=4 (branch if false), BI=cr0*4+2 (EQ bit) */
+    output_w32(B_FORM(OP_BC, 4, 2, (offset >> 2), 0, 0));
 }
 
 static void emit_beq(intptr_t addr)
@@ -934,8 +947,8 @@ static void emit_beq(intptr_t addr)
     intptr_t offset = addr - (intptr_t)out;
     assem_debug("beq %x", addr);
     assert(offset >= -32768LL && offset < 32768LL);
-    /* beq cr0: BO=0x18 (branch if false, z'=0), BI=cr0*4+2 (EQ bit) */
-    output_w32(B_FORM(OP_BC, 0x18, 2, (offset >> 2), 0, 0));
+    /* beq cr0: BO=12 (branch if true), BI=cr0*4+2 (EQ bit) */
+    output_w32(B_FORM(OP_BC, 12, 2, (offset >> 2), 0, 0));
 }
 
 static void emit_bgt(intptr_t addr)
@@ -943,8 +956,8 @@ static void emit_bgt(intptr_t addr)
     intptr_t offset = addr - (intptr_t)out;
     assem_debug("bgt %x", addr);
     assert(offset >= -32768LL && offset < 32768LL);
-    /* bgt cr0: BO=0x18 (branch if false), BI=cr0*4+1 (GT bit) */
-    output_w32(B_FORM(OP_BC, 0x18, 1, (offset >> 2), 0, 0));
+    /* bgt cr0: BO=12 (branch if true), BI=cr0*4+1 (GT bit) */
+    output_w32(B_FORM(OP_BC, 12, 1, (offset >> 2), 0, 0));
 }
 
 static void emit_blt(intptr_t addr)
@@ -952,8 +965,8 @@ static void emit_blt(intptr_t addr)
     intptr_t offset = addr - (intptr_t)out;
     assem_debug("blt %x", addr);
     assert(offset >= -32768LL && offset < 32768LL);
-    /* blt cr0: BO=0x18 (branch if false), BI=cr0*4+0 (LT bit) */
-    output_w32(B_FORM(OP_BC, 0x18, 0, (offset >> 2), 0, 0));
+    /* blt cr0: BO=12 (branch if true), BI=cr0*4+0 (LT bit) */
+    output_w32(B_FORM(OP_BC, 12, 0, (offset >> 2), 0, 0));
 }
 
 static void emit_bge(intptr_t addr)
@@ -961,8 +974,8 @@ static void emit_bge(intptr_t addr)
     intptr_t offset = addr - (intptr_t)out;
     assem_debug("bge %x", addr);
     assert(offset >= -32768LL && offset < 32768LL);
-    /* bge cr0: BO=0x10 (branch if true), BI=cr0*4+0 (LT bit) */
-    output_w32(B_FORM(OP_BC, 0x10, 0, (offset >> 2), 0, 0));
+    /* bge cr0: BO=4 (branch if false), BI=cr0*4+0 (LT bit) */
+    output_w32(B_FORM(OP_BC, 4, 0, (offset >> 2), 0, 0));
 }
 
 static void emit_ble(intptr_t addr)
@@ -970,8 +983,8 @@ static void emit_ble(intptr_t addr)
     intptr_t offset = addr - (intptr_t)out;
     assem_debug("ble %x", addr);
     assert(offset >= -32768LL && offset < 32768LL);
-    /* ble cr0: BO=0x10 (branch if true), BI=cr0*4+1 (GT bit) */
-    output_w32(B_FORM(OP_BC, 0x10, 1, (offset >> 2), 0, 0));
+    /* ble cr0: BO=4 (branch if false), BI=cr0*4+1 (GT bit) */
+    output_w32(B_FORM(OP_BC, 4, 1, (offset >> 2), 0, 0));
 }
 
 static void emit_bnecr(int cr, intptr_t addr)
@@ -979,7 +992,7 @@ static void emit_bnecr(int cr, intptr_t addr)
     intptr_t offset = addr - (intptr_t)out;
     assem_debug("bne cr%d, %x", cr, addr);
     assert(offset >= -32768LL && offset < 32768LL);
-    output_w32(B_FORM(OP_BC, 0x10, cr*4+2, (offset >> 2), 0, 0));
+    output_w32(B_FORM(OP_BC, 4, cr*4+2, (offset >> 2), 0, 0));
 }
 
 static void emit_beqcr(int cr, intptr_t addr)
@@ -987,7 +1000,7 @@ static void emit_beqcr(int cr, intptr_t addr)
     intptr_t offset = addr - (intptr_t)out;
     assem_debug("beq cr%d, %x", cr, addr);
     assert(offset >= -32768LL && offset < 32768LL);
-    output_w32(B_FORM(OP_BC, 0x18, cr*4+2, (offset >> 2), 0, 0));
+    output_w32(B_FORM(OP_BC, 12, cr*4+2, (offset >> 2), 0, 0));
 }
 
 static void emit_bgtcr(int cr, intptr_t addr)
@@ -995,7 +1008,7 @@ static void emit_bgtcr(int cr, intptr_t addr)
     intptr_t offset = addr - (intptr_t)out;
     assem_debug("bgt cr%d, %x", cr, addr);
     assert(offset >= -32768LL && offset < 32768LL);
-    output_w32(B_FORM(OP_BC, 0x18, cr*4+1, (offset >> 2), 0, 0));
+    output_w32(B_FORM(OP_BC, 12, cr*4+1, (offset >> 2), 0, 0));
 }
 
 static void emit_bltcr(int cr, intptr_t addr)
@@ -1003,7 +1016,7 @@ static void emit_bltcr(int cr, intptr_t addr)
     intptr_t offset = addr - (intptr_t)out;
     assem_debug("blt cr%d, %x", cr, addr);
     assert(offset >= -32768LL && offset < 32768LL);
-    output_w32(B_FORM(OP_BC, 0x18, cr*4+0, (offset >> 2), 0, 0));
+    output_w32(B_FORM(OP_BC, 12, cr*4+0, (offset >> 2), 0, 0));
 }
 
 static void emit_bne_ds(intptr_t addr)
@@ -1011,7 +1024,7 @@ static void emit_bne_ds(intptr_t addr)
     intptr_t offset = addr - (intptr_t)out;
     assem_debug("bne- %x", addr);
     assert(offset >= -32768LL && offset < 32768LL);
-    output_w32(B_FORM(OP_BC, 0x10, 2, (offset >> 2), 0, 0));
+    output_w32(B_FORM(OP_BC, 4, 2, (offset >> 2), 0, 0));
 }
 
 static void emit_beq_ds(intptr_t addr)
@@ -1019,7 +1032,7 @@ static void emit_beq_ds(intptr_t addr)
     intptr_t offset = addr - (intptr_t)out;
     assem_debug("beq- %x", addr);
     assert(offset >= -32768LL && offset < 32768LL);
-    output_w32(B_FORM(OP_BC, 0x18, 2, (offset >> 2), 0, 0));
+    output_w32(B_FORM(OP_BC, 12, 2, (offset >> 2), 0, 0));
 }
 
 static void emit_bgt_ds(intptr_t addr)
@@ -1027,7 +1040,7 @@ static void emit_bgt_ds(intptr_t addr)
     intptr_t offset = addr - (intptr_t)out;
     assem_debug("bgt- %x", addr);
     assert(offset >= -32768LL && offset < 32768LL);
-    output_w32(B_FORM(OP_BC, 0x18, 1, (offset >> 2), 0, 0));
+    output_w32(B_FORM(OP_BC, 12, 1, (offset >> 2), 0, 0));
 }
 
 static void emit_blt_ds(intptr_t addr)
@@ -1035,7 +1048,7 @@ static void emit_blt_ds(intptr_t addr)
     intptr_t offset = addr - (intptr_t)out;
     assem_debug("blt- %x", addr);
     assert(offset >= -32768LL && offset < 32768LL);
-    output_w32(B_FORM(OP_BC, 0x18, 0, (offset >> 2), 0, 0));
+    output_w32(B_FORM(OP_BC, 12, 0, (offset >> 2), 0, 0));
 }
 
 static void emit_bge_ds(intptr_t addr)
@@ -1043,7 +1056,7 @@ static void emit_bge_ds(intptr_t addr)
     intptr_t offset = addr - (intptr_t)out;
     assem_debug("bge- %x", addr);
     assert(offset >= -32768LL && offset < 32768LL);
-    output_w32(B_FORM(OP_BC, 0x10, 0, (offset >> 2), 0, 0));
+    output_w32(B_FORM(OP_BC, 4, 0, (offset >> 2), 0, 0));
 }
 
 static void emit_ble_ds(intptr_t addr)
@@ -1051,7 +1064,7 @@ static void emit_ble_ds(intptr_t addr)
     intptr_t offset = addr - (intptr_t)out;
     assem_debug("ble- %x", addr);
     assert(offset >= -32768LL && offset < 32768LL);
-    output_w32(B_FORM(OP_BC, 0x10, 1, (offset >> 2), 0, 0));
+    output_w32(B_FORM(OP_BC, 4, 1, (offset >> 2), 0, 0));
 }
 
 static void emit_jno_valid(intptr_t addr)
@@ -1124,7 +1137,7 @@ static void emit_test(int rs, int rt)
 {
     assem_debug("and. r0, r%d, r%d", rs, rt);
     /* and. r0, rs, rt (dot form sets CR0) */
-    output_w32(XO_FORM(OP_MFXSR, HREG(rs), HREG(rt), 0, XO_AND, 1));
+    output_w32(XO_FORM(OP_MFXSR, HREG(rs), 0, HREG(rt), XO_AND, 1));
 }
 
 static void emit_testimm(int rs, int imm)
@@ -1148,9 +1161,9 @@ static void emit_addimm(int rs, int imm, int rt)
         if (imm <= 32767) {
             output_w32(D_FORM_HR(OP_ADDI, rt, rs, imm));
         } else {
-            output_w32(D_FORM_HR(OP_ADDIS, rt, rs, imm >> 16));
-            if (imm & 0xffff)
-                output_w32(D_FORM_HR(OP_ORI, rt, rt, imm & 0xffff));
+            /* addis rs+65536, then addi neg to get rs+imm */
+            output_w32(D_FORM_HR(OP_ADDIS, rt, rs, 1));
+            output_w32(D_FORM_HR(OP_ADDI, rt, rt, imm - 65536));
         }
         return;
     }
@@ -1247,12 +1260,12 @@ static void emit_shlimm64(int rs, unsigned int imm, int rt)
 {
     assem_debug("sldi r%d, r%d, %d", rt, rs, imm);
     /* rldicr rt, rs, sh, 63-sh (shift left and clear right) */
-    /* MD-form: C15-11=sh[4:0], C1=sh[5], C10-6=me[4:0], C5=me[5], XO=0001 at C4-1 */
+    /* MD-form: opcd=30(0-5), RS(6-10), RA(11-15), sh(16-20), me(21-25), xo=1(26-30), Rc=0(31) */
     int sh = imm & 63;
     int me = (63 - sh) & 63;
     output_w32(0x78000002 | (HREG(rs) << 21) | (HREG(rt) << 16)
         | ((sh & 0x1f) << 11) | (((sh >> 5) & 1) << 10)
-        | ((me & 0x1f) << 5) | (((me >> 5) & 1) << 4));
+        | ((me & 0x1f) << 6));
 }
 
 /* Right shift (logical): srwi ra, rs, n */
@@ -1268,9 +1281,10 @@ static void emit_sarimm(int rs, unsigned int imm, int rt)
 {
     assem_debug("srawi r%d, r%d, %d", rt, rs, imm);
     if (imm >= 32) imm = 31; /* max shift for srawi */
-    /* srawi rt, rs, imm: opcode 31, xo=824 */
-    /* srawi: imm is a shift amount (5 bits), NOT a register index */
-    output_w32(X_FORM(31, HREG(rt), HREG(rs), imm, XO_SRAWI, 0));
+    /* srawi rt, rs, imm: opcode 31, xo=824
+     * srawi RA=rt, RS=rs, SH=imm
+     * X_FORM: (op, RS_field, RA_field, RB_field, xo, rc) */
+    output_w32(X_FORM(31, HREG(rs), HREG(rt), imm, XO_SRAWI, 0));
 }
 
 /* Rotate right: rlwinm rt, rs, 32-n, 0, 31 */
@@ -1288,22 +1302,23 @@ static void emit_shrimm64(int rs, unsigned int imm, int rt)
     assem_debug("srdi r%d, r%d, %d", rt, rs, imm);
     if (imm >= 64) { emit_zeroreg(rt); return; }
     /* srdi: rldicl rt, rs, 64-imm, imm */
+    /* MD-form: opcd=30(0-5), RS(6-10), RA(11-15), sh(16-20), mb(21-25), xo=0(26-30), Rc=0(31) */
     int sh = (64 - imm) & 63;
     int mb = imm & 63;
     output_w32(0x78000000 | (HREG(rs) << 21) | (HREG(rt) << 16)
         | ((sh & 0x1f) << 11) | (((sh >> 5) & 1) << 10)
-        | ((mb & 0x1f) << 5) | (((mb >> 5) & 1) << 4));
+        | ((mb & 0x1f) << 6));
 }
 
 static void emit_sarimm64(int rs, unsigned int imm, int rt)
 {
     assem_debug("sradi r%d, r%d, %d", rt, rs, imm);
     if (imm >= 64) imm = 63;
-    /* sradi: opcode 31, xo=413 (SH=0) or 413+32=445 (SH=1) */
+    /* sradi rt, rs, imm: sradi RA=rt, RS=rs, SH=imm
+     * X_FORM: (op, RS_field, RA_field, RB_field, xo, rc) */
     int sh_hi = (imm >> 5) & 1;
     int sh_lo = imm & 31;
-    /* sradi: sh_lo|(sh_hi<<5) encodes the shift amount, NOT a register index */
-    output_w32(X_FORM(31, HREG(rt), HREG(rs), sh_lo | (sh_hi << 5), XO_SRADI + sh_hi, 0));
+    output_w32(X_FORM(31, HREG(rs), HREG(rt), sh_lo | (sh_hi << 5), XO_SRADI + sh_hi, 0));
 }
 
 static void emit_rorimm64(int rs, unsigned int imm, int rt)
@@ -1469,8 +1484,8 @@ static void arch_init(void)
         u_int *slot = (u_int *)write_ptr;
         intptr_t offset_from_rx = (intptr_t)target - (intptr_t)rx_ptr;
         if (offset_from_rx >= -33554432LL && offset_from_rx < 33554432LL) {
-            /* Direct branch */
-            slot[0] = 0x48000000 | ((offset_from_rx >> 2) & 0x3FFFFFC); /* b target */
+            /* Direct branch: LI = word_offset & 0xFFFFFF, inserted at bits 25-2 */
+            slot[0] = 0x48000000 | (((offset_from_rx >> 2) & 0xFFFFFF) << 2); /* b target */
             slot[1] = 0x60000000;
             slot[2] = 0x60000000;
             slot[3] = 0x60000000;
@@ -1491,10 +1506,13 @@ static void arch_init(void)
             slot[5] = 0xE98C0004; /* ld r12, 4(r12) */
             slot[6] = 0x7D8903A6; /* mtctr r12 */
             slot[7] = 0x4E800420; /* bctr */
-        }
-        write_ptr += JUMP_TABLE_ENTRY_SIZE;
+    }
+    write_ptr += JUMP_TABLE_ENTRY_SIZE;
         rx_ptr += JUMP_TABLE_ENTRY_SIZE / 4; /* advance by 8 u_int = 32 bytes */
     }
+    /* Flush dcache + invalidate icache for the jump table region */
+    cache_flush((char *)base_addr + (1 << TARGET_SIZE_2) - JUMP_TABLE_SIZE,
+                (char *)base_addr + (1 << TARGET_SIZE_2));
 }
 
 /* ======================================================================== */
@@ -1716,10 +1734,10 @@ static void emit_jeq(intptr_t a)
 {
     assem_debug("beq %x", a);
     if(a < 4) {
-        output_w32(BC_BASE(20, 2));
+        output_w32(BC_BASE(12, 2));
     } else {
         intptr_t offset = a - (intptr_t)out;
-        output_w32(BC_BASE(20, 2) | (((offset >> 2) & 0x3fff) << 2));
+        output_w32(BC_BASE(12, 2) | (((offset >> 2) & 0x3fff) << 2));
     }
 }
 
@@ -1727,10 +1745,10 @@ static void emit_jne(intptr_t a)
 {
     assem_debug("bne %x", a);
     if(a < 4) {
-        output_w32(BC_BASE(16, 2));
+        output_w32(BC_BASE(4, 2));
     } else {
         intptr_t offset = a - (intptr_t)out;
-        output_w32(BC_BASE(16, 2) | (((offset >> 2) & 0x3fff) << 2));
+        output_w32(BC_BASE(4, 2) | (((offset >> 2) & 0x3fff) << 2));
     }
 }
 
@@ -1738,10 +1756,10 @@ static void emit_jl(intptr_t a)
 {
     assem_debug("blt %x", a);
     if(a < 4) {
-        output_w32(BC_BASE(20, 0));
+        output_w32(BC_BASE(12, 0));
     } else {
         intptr_t offset = a - (intptr_t)out;
-        output_w32(BC_BASE(20, 0) | (((offset >> 2) & 0x3fff) << 2));
+        output_w32(BC_BASE(12, 0) | (((offset >> 2) & 0x3fff) << 2));
     }
 }
 
@@ -1749,10 +1767,10 @@ static void emit_jge(intptr_t a)
 {
     assem_debug("bge %x", a);
     if(a < 4) {
-        output_w32(BC_BASE(16, 0));
+        output_w32(BC_BASE(4, 0));
     } else {
         intptr_t offset = a - (intptr_t)out;
-        output_w32(BC_BASE(16, 0) | (((offset >> 2) & 0x3fff) << 2));
+        output_w32(BC_BASE(4, 0) | (((offset >> 2) & 0x3fff) << 2));
     }
 }
 
@@ -1760,10 +1778,10 @@ static void emit_jb(intptr_t a)
 {
     assem_debug("blt(uns) %x", a);
     if(a < 4) {
-        output_w32(BC_BASE(20, 0));
+        output_w32(BC_BASE(12, 0));
     } else {
         intptr_t offset = a - (intptr_t)out;
-        output_w32(BC_BASE(20, 0) | (((offset >> 2) & 0x3fff) << 2));
+        output_w32(BC_BASE(12, 0) | (((offset >> 2) & 0x3fff) << 2));
     }
 }
 
@@ -1771,10 +1789,10 @@ static void emit_jae(intptr_t a)
 {
     assem_debug("bge(uns) %x", a);
     if(a < 4) {
-        output_w32(BC_BASE(16, 0));
+        output_w32(BC_BASE(4, 0));
     } else {
         intptr_t offset = a - (intptr_t)out;
-        output_w32(BC_BASE(16, 0) | (((offset >> 2) & 0x3fff) << 2));
+        output_w32(BC_BASE(4, 0) | (((offset >> 2) & 0x3fff) << 2));
     }
 }
 
@@ -1782,10 +1800,10 @@ static void emit_js(intptr_t a)
 {
     assem_debug("blt(sign) %x", a);
     if(a < 4) {
-        output_w32(BC_BASE(20, 0));
+        output_w32(BC_BASE(12, 0));
     } else {
         intptr_t offset = a - (intptr_t)out;
-        output_w32(BC_BASE(20, 0) | (((offset >> 2) & 0x3fff) << 2));
+        output_w32(BC_BASE(12, 0) | (((offset >> 2) & 0x3fff) << 2));
     }
 }
 
@@ -1793,10 +1811,10 @@ static void emit_jns(intptr_t a)
 {
     assem_debug("bge(sign) %x", a);
     if(a < 4) {
-        output_w32(BC_BASE(16, 0));
+        output_w32(BC_BASE(4, 0));
     } else {
         intptr_t offset = a - (intptr_t)out;
-        output_w32(BC_BASE(16, 0) | (((offset >> 2) & 0x3fff) << 2));
+        output_w32(BC_BASE(4, 0) | (((offset >> 2) & 0x3fff) << 2));
     }
 }
 
@@ -1804,10 +1822,10 @@ static void emit_jno(intptr_t a)
 {
     assem_debug("bno %x", a);
     if(a < 4) {
-        output_w32(BC_BASE(16, 3));
+        output_w32(BC_BASE(4, 3));
     } else {
         intptr_t offset = a - (intptr_t)out;
-        output_w32(BC_BASE(16, 3) | (((offset >> 2) & 0x3fff) << 2));
+        output_w32(BC_BASE(4, 3) | (((offset >> 2) & 0x3fff) << 2));
     }
 }
 
@@ -1822,17 +1840,19 @@ static void emit_jno_unlikely(intptr_t a)
 static void emit_extjump2(intptr_t addr, int target, intptr_t linker)
 {
     assem_debug("extjump2 %x->%x linker=%p", addr, target, (void*)linker);
-    /* Load N64 target address into ARG1_REG (r3) for dynamic_linker.
-     * ARG1_REG=3 is a PPC number; pass PPC_HREG(3)=1 so _HR macros decode to r3. */
-    int ar1 = PPC_HREG(ARG1_REG);
+    /* dynamic_linker(void *src, u_int vaddr) expects:
+     *   r3 = src (placeholder address in code buffer)
+     *   r4 = vaddr (N64 target address)
+     * The placeholder B instruction at addr will be patched by set_jump_target
+     * to jump directly to the compiled block once available, bypassing this stub. */
+    int ar1 = PPC_HREG(ARG1_REG);  /* r3 — src */
+    int ar2 = PPC_HREG(ARG2_REG);  /* r4 — vaddr */
+    emit_movimm64(addr, ar1);
     if((u_int)target < 65536) {
-        emit_mov(target, ar1);
+        emit_mov(target, ar2);
     } else {
-        emit_movimm((u_int)target, ar1);
+        emit_movimm((u_int)target, ar2);
     }
-    /* Jump to linker (dyna_linker/dyna_linker_ds) which compiles/looks up the block.
-     * The placeholder B instruction at addr is patched by set_jump_target (in the
-     * caller) to jump directly to the compiled block once available, bypassing this stub. */
     emit_jmp(linker);
 }
 
@@ -1845,7 +1865,7 @@ static void emit_cmovne_reg(int hr, int addr)
 {
     assem_debug("cmovne r%d, r%d", hr, addr);
     /* beq $+8  (skip mr if equal) */
-    output_w32(BC_BASE(20, 2) | (2 << 2));
+    output_w32(BC_BASE(12, 2) | (2 << 2));
     emit_mov(addr, hr);
 }
 
@@ -1853,7 +1873,7 @@ static void emit_cmovl_reg(int hr, int addr)
 {
     assem_debug("cmovl r%d, r%d", hr, addr);
     /* bge $+8 (skip mr if not less) */
-    output_w32(BC_BASE(16, 0) | (2 << 2));
+    output_w32(BC_BASE(4, 0) | (2 << 2));
     emit_mov(addr, hr);
 }
 
@@ -1861,7 +1881,7 @@ static void emit_cmovs_reg(int hr, int addr)
 {
     assem_debug("cmovs r%d, r%d", hr, addr);
     /* bge $+8 (skip mr if not negative) */
-    output_w32(BC_BASE(16, 0) | (2 << 2));
+    output_w32(BC_BASE(4, 0) | (2 << 2));
     emit_mov(addr, hr);
 }
 
@@ -1869,7 +1889,7 @@ static void emit_cmovs(int hr)
 {
     assem_debug("cmovs(imm0) r%d", hr);
     /* bge $+8 (skip mr if not negative => value < 0 -> move zero) */
-    output_w32(BC_BASE(16, 0) | (2 << 2));
+    output_w32(BC_BASE(4, 0) | (2 << 2));
     emit_zeroreg(hr);
 }
 
@@ -2563,6 +2583,8 @@ static void generate_map_const(u_int addr, int tr)
     assem_debug("generate_map_const %x -> r%d", addr, tr);
     /* Compute byte offset into memory_map array: (addr>>12)*8 = addr>>9 */
     uintptr_t const_val = ((uintptr_t)(addr >> 12) * 8) + fp_memory_map;
+    fprintf(stderr, "PPC64: generate_map_const addr=0x%x const_val=0x%lx fp_memory_map=0x%lx\n",
+            addr, (unsigned long)const_val, (unsigned long)fp_memory_map);
     emit_movimm64(const_val, tr);
 }
 
@@ -2662,7 +2684,7 @@ static void do_invstub(int n)
     u_int reglist = stubs[n][3];
     set_jump_target(stubs[n][1], (intptr_t)out);
     save_regs(reglist);
-    if(stubs[n][4] != 0) emit_zeroreg(stubs[n][4]);
+    if(stubs[n][4] != 0) emit_mov(stubs[n][4], PPC_HREG(ARG1_REG));
     emit_call((intptr_t)&invalidate_addr);
     restore_regs(reglist);
     emit_jmp(stubs[n][2]);
@@ -2674,8 +2696,7 @@ static void do_invstub(int n)
 static intptr_t do_dirty_stub(int i, struct ll_entry *head)
 {
     assem_debug("do_dirty_stub %x", head->vaddr);
-    /* Load head pointer into ARG1_REG and call verify_code.
-     * ARG1_REG=3 is a PPC number; use PPC_HREG so _HR macros decode correctly. */
+    /* Load head pointer into r3 (ARG1_REG) and call verify_code. */
     emit_movimm64((uintptr_t)head, PPC_HREG(ARG1_REG));
     emit_call((intptr_t)verify_code);
     intptr_t entry = (intptr_t)out;
@@ -3157,5 +3178,13 @@ static void invalidate_addr(u_int addr)
 /* ======================================================================== */
 /* emit_addnop — alignment NOP for 8-byte alignment                          */
 /* ======================================================================== */
+
+/* ======================================================================== */
+/* Debug helper — called from linkage_ppc64.S before first bctr             */
+/* ======================================================================== */
+void ppc64_debug_jump(void *target)
+{
+    fprintf(stderr, "PPC64: jumping to %p\n", target);
+}
 
 #pragma GCC diagnostic pop

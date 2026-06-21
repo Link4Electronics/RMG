@@ -390,10 +390,22 @@ GLOBAL_FUNCTION(new_dyna_start):
     ori    3, 3, 0x0040
     bl     new_recompile_block
     nop
+    /* Reload base_addr_rx fresh from GOT — r15 may be clobbered by C code
+     * even though it is nominally callee-saved (the generaged code keeps
+     * r15 as HOST_BTREG and the register allocator may allocate it). */
+    addis  11, 2, base_addr_rx@got@ha
+    ld     11, base_addr_rx@got@l(11)
+    ld     11, 0(11)
+    /* Diagnostic: save r11, print jump target, restore r11 */
+    std    11, 176(1)
+    mr     3, 11
+    bl     ppc64_debug_jump
+    nop
+    ld     11, 176(1)
     /* Load cycle_count */
     lwz    14, fp_cycle_count(31)      /* r14 = HOST_CCREG */
     /* Jump to first block */
-    mtctr  15
+    mtctr  11
     bctr
 
 GLOBAL_FUNCTION(breakpoint):
