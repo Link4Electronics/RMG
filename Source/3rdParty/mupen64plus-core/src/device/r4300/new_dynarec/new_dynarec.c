@@ -2117,8 +2117,20 @@ static void read_word_new(int pcaddr, int count)
   UPDATE_COUNT_IN
   state->pcaddr = pcaddr&~1;
   r4300->delay_slot = pcaddr & 1;
+  static int dbg = 0;
+  if (state->address == 0xA470000C && dbg < 3) {
+    dbg++;
+    fprintf(stderr, "PPC64: read_word_new addr=0x%08x pc=0x%05x count=%d\n", state->address, pcaddr, count);
+  }
   if (r4300_read_aligned_word(r4300, state->address, &value)) {
     state->rdword = (uint64_t)(value);
+    if (state->address == 0xA470000C && dbg <= 3) {
+      fprintf(stderr, "PPC64: read_word_new value=0x%08x\n", value);
+    }
+  } else {
+    if (state->address == 0xA470000C && dbg <= 3) {
+      fprintf(stderr, "PPC64: read_word_new FAILED!\n");
+    }
   }
   UPDATE_COUNT_OUT
 }
