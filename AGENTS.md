@@ -140,6 +140,7 @@ GLideN64 uses ad-hoc XOR patterns on pointers/indexes to compensate for LE byte-
 | Missing `emit_addimm64` | Compile error: implicit declaration | Add `emit_addimm64(rs, imm, rt)` delegating to `emit_addimm` |
 | Missing `emit_addimm_and_set_flags` | Compile error: implicit declaration | Add 2-instruction sequence (`addi` + `cmpwi`) for CR0 |
 | `emit_movimm64` wrong 64-bit constant construction | Segfault at code buffer+0x10 on first block | Rewrite to build upper 32 bits → `sldi` by 32 → lower 32 bits (proper PPC64 pattern) |
+| `emit_jeq`/`emit_jne`/etc BO values swapped | Game data never loaded — BNE inverted → RI_SELECT check always fell through | Revert: `jeq→12`, `jne→4`, `jl→12`, `jge→4`, `jb→12`, `jae→4`, `js→12`, `jns→4`, `jno→4` (all `bt`=BO12, `bf`=BO4) |
 
 ### FPU support — C fallbacks (PPC scalar FPU not used)
 
@@ -184,14 +185,14 @@ The PPC64 backend has built-in stderr diagnostics (added 2024-06):
 ## Code structure: ~98%
 All required functions exist and compile clean (0 errors, 0 warnings). The file is structurally complete at ~3057 lines (ARM64 reference is 4661 — PPC64 is shorter because FPU uses C fallbacks instead of NEON SIMD assembly).
 
-## Runtime correctness: ~5%
-The generated code is **incorrect** — SM64 boots to black screen with Rice video (same game works with interpreter + Rice). Root cause unknown — likely a subtle encoding or pipeline bug in one or more emitter functions.
+## Runtime correctness: ~10%
+The generated code was **incorrect** because all branch emitters had inverted BO values (commit 8958b913 swapped BO=12↔BO=4). SM64 booted to black screen — BNE at the RI_SELECT check always fell through, so IPL3 never loaded the game. After reverting BO values to the original correct mapping, the dynarec should now follow the correct code paths.
 
 ## Breakdown by subsystem
 
 | Subsystem | Status | Notes |
 |-----------|--------|-------|
-| Branch encoding (B/BC/BL) | **Likely OK** | Verified mask values (`0xFFFFFF`, `0x3fff`) |
+| Branch encoding (B/BC/BL) | **FIXED** | BO=12 for `bt` (branch-true), BO=4 for `bf` (branch-false). Commit 8958b913 wrongly swapped them; now reverted to original correct mapping. |
 | ALU (add/sub/and/or/xor) | **Likely OK** | `_HR` macros applied consistently |
 | Memory load/store (D-form) | **Likely OK** | Uses `D_FORM_HR`, FP offsets within range |
 | 64-bit constant loading | **FIXED** | Was broken (missing `sldi`), now correct |
@@ -204,6 +205,11 @@ The generated code is **incorrect** — SM64 boots to black screen with Rice vid
 | Linkage assembly | **Likely OK** | Working — first block entered successfully |
 
 ## Next debugging steps
+
+1. **Run with diagnostics:** `./rmg 2> rmg.log` and examine the first block's compiled PPC instruction hex dump
+2. **Compare with expected output:** Manually decode the first few MIPS → PPC translations and verify correctness
+3. **Test with `RECOMPILER_DEBUG`:** Enables verbose `assem_debug` logging throughout `new_dynarec.c`
+4. **Isolate first incorrect block:** Narrow down which MIPS instruction produces wrong PPC code by removing blocks from the log
 
 1. **Run with diagnostics:** `./rmg 2> rmg.log` and examine the first block's compiled PPC instruction hex dump
 2. **Compare with expected output:** Manually decode the first few MIPS → PPC translations and verify correctness

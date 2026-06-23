@@ -1734,17 +1734,6 @@ static void emit_jeq(intptr_t a)
 {
     assem_debug("beq %x", a);
     if(a < 4) {
-        output_w32(BC_BASE(13, 2));
-    } else {
-        intptr_t offset = a - (intptr_t)out;
-        output_w32(BC_BASE(13, 2) | (((offset >> 2) & 0x3fff) << 2));
-    }
-}
-
-static void emit_jne(intptr_t a)
-{
-    assem_debug("bne %x", a);
-    if(a < 4) {
         output_w32(BC_BASE(12, 2));
     } else {
         intptr_t offset = a - (intptr_t)out;
@@ -1752,14 +1741,25 @@ static void emit_jne(intptr_t a)
     }
 }
 
+static void emit_jne(intptr_t a)
+{
+    assem_debug("bne %x", a);
+    if(a < 4) {
+        output_w32(BC_BASE(4, 2));
+    } else {
+        intptr_t offset = a - (intptr_t)out;
+        output_w32(BC_BASE(4, 2) | (((offset >> 2) & 0x3fff) << 2));
+    }
+}
+
 static void emit_jl(intptr_t a)
 {
     assem_debug("blt %x", a);
     if(a < 4) {
-        output_w32(BC_BASE(13, 0));
+        output_w32(BC_BASE(12, 0));
     } else {
         intptr_t offset = a - (intptr_t)out;
-        output_w32(BC_BASE(13, 0) | (((offset >> 2) & 0x3fff) << 2));
+        output_w32(BC_BASE(12, 0) | (((offset >> 2) & 0x3fff) << 2));
     }
 }
 
@@ -1767,10 +1767,10 @@ static void emit_jge(intptr_t a)
 {
     assem_debug("bge %x", a);
     if(a < 4) {
-        output_w32(BC_BASE(12, 0));
+        output_w32(BC_BASE(4, 0));
     } else {
         intptr_t offset = a - (intptr_t)out;
-        output_w32(BC_BASE(12, 0) | (((offset >> 2) & 0x3fff) << 2));
+        output_w32(BC_BASE(4, 0) | (((offset >> 2) & 0x3fff) << 2));
     }
 }
 
@@ -1778,10 +1778,10 @@ static void emit_jb(intptr_t a)
 {
     assem_debug("blt(uns) %x", a);
     if(a < 4) {
-        output_w32(BC_BASE(13, 0));
+        output_w32(BC_BASE(12, 0));
     } else {
         intptr_t offset = a - (intptr_t)out;
-        output_w32(BC_BASE(13, 0) | (((offset >> 2) & 0x3fff) << 2));
+        output_w32(BC_BASE(12, 0) | (((offset >> 2) & 0x3fff) << 2));
     }
 }
 
@@ -1789,10 +1789,10 @@ static void emit_jae(intptr_t a)
 {
     assem_debug("bge(uns) %x", a);
     if(a < 4) {
-        output_w32(BC_BASE(12, 0));
+        output_w32(BC_BASE(4, 0));
     } else {
         intptr_t offset = a - (intptr_t)out;
-        output_w32(BC_BASE(12, 0) | (((offset >> 2) & 0x3fff) << 2));
+        output_w32(BC_BASE(4, 0) | (((offset >> 2) & 0x3fff) << 2));
     }
 }
 
@@ -1800,17 +1800,6 @@ static void emit_js(intptr_t a)
 {
     assem_debug("blt(sign) %x", a);
     if(a < 4) {
-        output_w32(BC_BASE(13, 0));
-    } else {
-        intptr_t offset = a - (intptr_t)out;
-        output_w32(BC_BASE(13, 0) | (((offset >> 2) & 0x3fff) << 2));
-    }
-}
-
-static void emit_jns(intptr_t a)
-{
-    assem_debug("bge(sign) %x", a);
-    if(a < 4) {
         output_w32(BC_BASE(12, 0));
     } else {
         intptr_t offset = a - (intptr_t)out;
@@ -1818,14 +1807,25 @@ static void emit_jns(intptr_t a)
     }
 }
 
+static void emit_jns(intptr_t a)
+{
+    assem_debug("bge(sign) %x", a);
+    if(a < 4) {
+        output_w32(BC_BASE(4, 0));
+    } else {
+        intptr_t offset = a - (intptr_t)out;
+        output_w32(BC_BASE(4, 0) | (((offset >> 2) & 0x3fff) << 2));
+    }
+}
+
 static void emit_jno(intptr_t a)
 {
     assem_debug("bno %x", a);
     if(a < 4) {
-        output_w32(BC_BASE(12, 3));
+        output_w32(BC_BASE(4, 3));
     } else {
         intptr_t offset = a - (intptr_t)out;
-        output_w32(BC_BASE(12, 3) | (((offset >> 2) & 0x3fff) << 2));
+        output_w32(BC_BASE(4, 3) | (((offset >> 2) & 0x3fff) << 2));
     }
 }
 
@@ -1865,7 +1865,7 @@ static void emit_cmovne_reg(int hr, int addr)
 {
     assem_debug("cmovne r%d, r%d", hr, addr);
     /* beq $+8  (skip mr if equal) */
-    output_w32(BC_BASE(13, 2) | (2 << 2));
+    output_w32(BC_BASE(12, 2) | (2 << 2));
     emit_mov(addr, hr);
 }
 
@@ -1873,7 +1873,7 @@ static void emit_cmovl_reg(int hr, int addr)
 {
     assem_debug("cmovl r%d, r%d", hr, addr);
     /* bge $+8 (skip mr if not less) */
-    output_w32(BC_BASE(12, 0) | (2 << 2));
+    output_w32(BC_BASE(4, 0) | (2 << 2));
     emit_mov(addr, hr);
 }
 
@@ -1881,7 +1881,7 @@ static void emit_cmovs_reg(int hr, int addr)
 {
     assem_debug("cmovs r%d, r%d", hr, addr);
     /* bge $+8 (skip mr if not negative) */
-    output_w32(BC_BASE(12, 0) | (2 << 2));
+    output_w32(BC_BASE(4, 0) | (2 << 2));
     emit_mov(addr, hr);
 }
 
@@ -1889,7 +1889,7 @@ static void emit_cmovs(int hr)
 {
     assem_debug("cmovs(imm0) r%d", hr);
     /* bge $+8 (skip mr if not negative => value < 0 -> move zero) */
-    output_w32(BC_BASE(12, 0) | (2 << 2));
+    output_w32(BC_BASE(4, 0) | (2 << 2));
     emit_zeroreg(hr);
 }
 
