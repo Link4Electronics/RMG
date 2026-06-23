@@ -8883,6 +8883,13 @@ int new_recompile_block(int addr)
   /* Pass 1 disassembly */
 
   for(i=0;!done;i++) {
+#if NEW_DYNAREC == NEW_DYNAREC_PPC64
+    if(i == 0 && source) {
+        fprintf(stderr, "PPC64: block at 0x%08X first 10 MIPS words:\n", start);
+        for(int _k = 0; _k < 10; _k++)
+            fprintf(stderr, "  [%d] 0x%08X\n", _k, source[_k]);
+    }
+#endif
     bt[i]=0;likely[i]=0;ooo[i]=0;op2=0;
     minimum_free_regs[i]=0;
     opcode[i]=op=source[i]>>26;
