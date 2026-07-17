@@ -667,6 +667,33 @@ static inline int PPC_HREG(int ppc) {
 #define XO_CNTLZD 58  /* cntlzd */
 
 /* ======================================================================== */
+/* FPU opcodes (opcode = 59 for single, 63 for double, specials)            */
+/* ======================================================================== */
+/* FPU extended opcodes (XO field, 10-bit) for single (op=59) & double (op=63) */
+#define XO_FADD      21   /* fadd[s]  frD,frA,frB */
+#define XO_FSUB      20   /* fsub[s]  frD,frA,frB */
+#define XO_FMUL      25   /* fmul[s]  frD,frA,frC */
+#define XO_FDIV      18   /* fdiv[s]  frD,frA,frB */
+#define XO_FSQRT     22   /* fsqrt[s] frD,0,frB */
+#define XO_FABS     264   /* fabs     frD,0,frB */
+#define XO_FMR       72   /* fmr      frD,0,frB */
+#define XO_FNEG      40   /* fneg     frD,0,frB */
+#define XO_FCTIWZ    15   /* fctiwz   frD,0,frB — truncate to int32 */
+#define XO_FCTIW     14   /* fctiw    frD,0,frB — current RM to int32 */
+#define XO_FRSP      12   /* frsp     frD,0,frB — round to single */
+#define XO_FCFID    846   /* fcfid    frD,0,frB — int64 to double */
+#define XO_MFFS     583   /* mffs     frD — move from FPSCR */
+#define XO_MTFSFI   134   /* mtfsfi   BF,imm — move to FPSCR field imm */
+#define XO_FCMPU      0   /* fcmpu    crfD,frA,frB */
+#define XO_STFIWX   983   /* stfiwx   frS,ra,rb (opcode=31) */
+
+/* FPR scratch registers (in PPC FPU, registers f0-f31, Linux ABI volatile) */
+#define FPR_SCR0  0
+#define FPR_SCR1  1
+#define FPR_SCR2  2
+#define FPR_SCR3  3
+
+/* ======================================================================== */
 /* Helper: output 32-bit instruction                                        */
 /* ======================================================================== */
 static void output_w32(u_int word)
@@ -1104,9 +1131,18 @@ static void emit_cmp(int rs, int rt)
 
 static void emit_cmpimm(int rs, int imm)
 {
-    assem_debug("cmpwi cr0, r%d, %d", rs, imm);
-    /* cmpi BF=0, L=0, ra=rs, simm */
-    output_w32(D_FORM(OP_CMPI, 0, HREG(rs), imm));
+    if(imm == 0x800000) {
+        /* KSEG0 check for memory fast path (used before emit_jno).
+         * On PPC64 there is no overflow flag, so we test bit 31 directly
+         * via andis. instead of a signed cmpwi (which can't distinguish
+         * the signed-negative KSEG0 range from small positive values).
+         * andis. r0, rs, 0x8000 → r0 = rs & 0x80000000, sets CR0[EQ]. */
+        assem_debug("andis. r0, r%d, 0x8000  (KSEG0 check)", rs);
+        output_w32(D_FORM(OP_ANDIS, 0, HREG(rs), 0x8000));
+    } else {
+        assem_debug("cmpwi cr0, r%d, %d", rs, imm);
+        output_w32(D_FORM(OP_CMPI, 0, HREG(rs), imm));
+    }
 }
 
 static void emit_cmpu(int rs, int rt)
@@ -1442,7 +1478,7 @@ static void arch_init(void)
     
 #ifdef RAM_OFFSET
     g_dev.r4300.new_dynarec_hot_state.ram_offset = 
-        ((intptr_t)g_dev.rdram.dram - (intptr_t)0x80000000) >> 2;
+        (intptr_t)g_dev.rdram.dram - (intptr_t)0x80000000;
 #endif
     
     /* Populate jump table with function pointers */
@@ -1707,6 +1743,11 @@ static void emit_writehword_indexed_tlb(int rs, int addr, int ra, int map)
 /* ======================================================================== */
 /* BC conditional branch base encodings (AA=0, LK=0) */
 #define BC_BASE(bo, bi) (0x40000000 | ((bo)&0x1f)<<21 | ((bi)&0x1f)<<16)
+/* BO values for bc instruction:
+ * BT_BO=12: bt — branch if condition true (CR bit = 1)
+ * BF_BO=4:  bf — branch if condition false (CR bit = 0) */
+#define BT_BO 12
+#define BF_BO 4
 
 static void emit_jmp(intptr_t a)
 {
@@ -1820,12 +1861,18 @@ static void emit_jns(intptr_t a)
 
 static void emit_jno(intptr_t a)
 {
-    assem_debug("bno %x", a);
+    /* On PPC64 there is no overflow flag, so "no overflow" is
+     * implemented as "branch if NOT KSEG0" after emit_cmpimm's andis.
+     * test of bit 31:
+     *   andis. r0, rs, 0x8000  → CR0[EQ]=1 if bit 31 clear (not KSEG0)
+     *   beq stub                → branch to stub when NOT KSEG0
+     * KSEG0 addresses (bit 31 set) fall through to the fast path. */
+    assem_debug("beq (not KSEG0) %x", a);
     if(a < 4) {
-        output_w32(BC_BASE(4, 3));
+        output_w32(BC_BASE(12, 2));  /* beq — branch if CR0[EQ]=1 */
     } else {
         intptr_t offset = a - (intptr_t)out;
-        output_w32(BC_BASE(4, 3) | (((offset >> 2) & 0x3fff) << 2));
+        output_w32(BC_BASE(12, 2) | (((offset >> 2) & 0x3fff) << 2));
     }
 }
 
@@ -2310,7 +2357,7 @@ static void emit_loadreg(u_int r, int hr)
         if(r == ROREG) offset = fp_ram_offset;
         assert(offset < 0x8000);
         assert((offset & 3) == 0);
-        emit_readword_indexed(offset, FP, hr);
+        emit_readdword_indexed(offset, FP, hr);  /* 64-bit load — intptr_t fields */
     } else {
         u_int offset;
         if((r & 63) == HIREG)
@@ -2483,7 +2530,9 @@ static void emit_sltiu64_32(int rsh, int rsl, int imm, int rt)
 /* ======================================================================== */
 static void save_regs(u_int reglist)
 {
-    /* PPC64 caller-saved: r3-r12 = host indices 0-9 */
+    /* PPC64 caller-saved: r3-r12 = host indices 0-9
+     * Use 64-bit stores (std) because registers hold full 64-bit values
+     * (pointers, ram_offset, memory_map entries). 32-bit stw would truncate. */
     reglist &= 0x3FF;
     if(!reglist) return;
     int i, count = 0;
@@ -2493,14 +2542,14 @@ static void save_regs(u_int reglist)
             regs[count++] = host_reg_ppc[i];
     }
     if(!count) return;
-    int stack_size = ((count * 4) + 15) & ~15;
+    int stack_size = ((count * 8) + 15) & ~15;
     /* Allocate stack frame: addi SP, SP, -stack_size (raw PPC numbers) */
     output_w32(D_FORM(OP_ADDI, SP, SP, -stack_size));
-    /* Save each register */
+    /* Save each register (64-bit) */
     int offset = 0;
     for(i = 0; i < count; i++) {
-        output_w32(D_FORM(OP_STW, regs[i], SP, offset));
-        offset += 4;
+        output_w32(D_FORM(OP_STD, regs[i], SP, offset));
+        offset += 8;
     }
 }
 
@@ -2515,12 +2564,12 @@ static void restore_regs(u_int reglist)
             regs[count++] = host_reg_ppc[i];
     }
     if(!count) return;
-    int stack_size = ((count * 4) + 15) & ~15;
-    /* Restore registers */
+    int stack_size = ((count * 8) + 15) & ~15;
+    /* Restore registers (64-bit) */
     int offset = 0;
     for(i = 0; i < count; i++) {
-        output_w32(D_FORM(OP_LWZ, regs[i], SP, offset));
-        offset += 4;
+        output_w32(D_FORM(OP_LD, regs[i], SP, offset));
+        offset += 8;
     }
     /* Deallocate stack frame: addi SP, SP, stack_size (raw PPC numbers) */
     output_w32(D_FORM(OP_ADDI, SP, SP, stack_size));
@@ -2591,6 +2640,13 @@ static void generate_map_const(u_int addr, int tr)
 /* ======================================================================== */
 /* TLB helper functions (ported from ARM64)                                  */
 /* ======================================================================== */
+
+/* Back-patch targets for the dynamic KSEG0 fast path jump.
+ * Set by do_tlb_r/do_tlb_w when they emit a KSEG0 bypass for c=0,
+ * cleared by do_tlb_r_branch/do_tlb_w_branch after fixing up the target. */
+static intptr_t kseg0_read_jmp = 0;
+static intptr_t kseg0_write_jmp = 0;
+
 static int do_tlb_r(int s, int ar, int map, int cache, int x, int c, u_int addr)
 {
     (void)ar;
@@ -2607,6 +2663,32 @@ static int do_tlb_r(int s, int ar, int map, int cache, int x, int c, u_int addr)
     }
     else {
         assert(s != map);
+        /* KSEG0 fast path for dynamic addresses.
+         * KSEG0 = 0x80000000-0x9FFFFFFF (bits 31=1, 30=0, 29=0).
+         * Test: bit 31 set AND bits 30-29 both clear.
+         * KSEG1 (0xA0000000+) and KSEG2 (0xC0000000+) must use memory_map. */
+        kseg0_read_jmp = 0;
+        /* andis. r0, s, 0x8000 → r0 = s & 0x80000000, sets CR0[EQ] */
+        output_w32(D_FORM(OP_ANDIS, 0, HREG(s), 0x8000));
+        intptr_t jnokseg = (intptr_t)out;
+        emit_jeq(0);  /* branch to memory_map if bit 31 clear */
+
+        /* andis. r0, s, 0x6000 → r0 = s & 0x60000000 (bits 30+29 combined) */
+        output_w32(D_FORM(OP_ANDIS, 0, HREG(s), 0x6000));
+        intptr_t jkseg12 = (intptr_t)out;
+        emit_jne(0);  /* branch to memory_map if bit 30 or 29 set (KSEG1/KSEG2) */
+
+        /* KSEG0: map = ram_offset  (fast path — addr added by indexed load) */
+        emit_loadreg(ROREG, map);
+
+        /* Jump over the memory_map code + do_tlb_r_branch code */
+        kseg0_read_jmp = (intptr_t)out;
+        emit_jmp(0);
+
+        /* Not KSEG0: fall through to memory_map path */
+        set_jump_target(jnokseg, (intptr_t)out);
+        set_jump_target(jkseg12, (intptr_t)out);
+
         if(cache >= 0) {
             /* Use cached offset to memory map */
             emit_shrimm(s, 9, HOST_TEMPREG);
@@ -2632,6 +2714,13 @@ static int do_tlb_r_branch(int map, int c, u_int addr, intptr_t *jaddr)
          * re-shift to get the full byte offset before using as base. */
         emit_shlimm64(map, 2, map);
     }
+
+    /* Fix up KSEG0 fast path jump target to skip over the TLB branch+shift code.
+     * The KSEG0 fast path (ram_offset + addr) does not need shifting. */
+    if(kseg0_read_jmp) {
+        set_jump_target(kseg0_read_jmp, (intptr_t)out);
+        kseg0_read_jmp = 0;
+    }
     return map;
 }
 
@@ -2647,6 +2736,21 @@ static int do_tlb_w(int s, int ar, int map, int cache, int x, int c, u_int addr)
     }
     else {
         assert(s != map);
+        /* KSEG0 fast path for dynamic addresses (same as do_tlb_r) */
+        kseg0_write_jmp = 0;
+        /* andis. r0, s, 0x8000 → r0 = s & 0x80000000, sets CR0[EQ] */
+        output_w32(D_FORM(OP_ANDIS, 0, HREG(s), 0x8000));
+        intptr_t jnokseg0 = (intptr_t)out;
+        emit_jeq(0);
+
+        /* KSEG0: map = ram_offset (addr added by indexed store) */
+        emit_loadreg(ROREG, map);
+
+        kseg0_write_jmp = (intptr_t)out;
+        emit_jmp(0);
+
+        set_jump_target(jnokseg0, (intptr_t)out);
+
         if(cache >= 0) {
             emit_shrimm(s, 9, HOST_TEMPREG);
             emit_add(cache, HOST_TEMPREG, map);
@@ -2671,6 +2775,12 @@ static void do_tlb_w_branch(int map, int c, u_int addr, intptr_t *jaddr)
         /* Shift memory_map value to get full byte offset for indexed loads.
          * Must happen after WRITE_PROTECT check which uses pre-shifted value. */
         emit_shlimm64(map, 2, map);
+    }
+
+    /* Fix up KSEG0 fast path jump target (same as do_tlb_r_branch) */
+    if(kseg0_write_jmp) {
+        set_jump_target(kseg0_write_jmp, (intptr_t)out);
+        kseg0_write_jmp = 0;
     }
 }
 
@@ -2792,7 +2902,137 @@ static void do_miniht_insert(u_int return_address, int rt, int temp)
 }
 
 /* ======================================================================== */
-/* fconv_assemble — FPU conversion & rounding ops via C fallback            */
+/* FPU emitter helpers — native PPC floating-point instruction output       */
+/* ======================================================================== */
+
+/* FP A-form: opcode(6) | frt(5) | fra(5) | frb(5) | xo(5) | xo2(5) | rc(1) */
+/* On PPC, the A-form extended opcode is 10 bits but encoded as xo(5)+0(5)  */
+/* The XO_FORM / X_FORM macros put rt/ra/rb at the correct bit positions    */
+
+/* Double-precision FP arithmetic (opcode 63) */
+static void emit_fadd(int frd, int fra, int frb)
+{
+    output_w32(XO_FORM(63, frd, fra, frb, XO_FADD, 0));
+}
+static void emit_fsub(int frd, int fra, int frb)
+{
+    output_w32(XO_FORM(63, frd, fra, frb, XO_FSUB, 0));
+}
+static void emit_fmul(int frd, int fra, int frb)
+{
+    output_w32(XO_FORM(63, frd, fra, frb, XO_FMUL, 0));
+}
+static void emit_fdiv(int frd, int fra, int frb)
+{
+    output_w32(XO_FORM(63, frd, fra, frb, XO_FDIV, 0));
+}
+
+/* Single-precision FP arithmetic (opcode 59) */
+static void emit_fadds(int frd, int fra, int frb)
+{
+    output_w32(XO_FORM(59, frd, fra, frb, XO_FADD, 0));
+}
+static void emit_fsubs(int frd, int fra, int frb)
+{
+    output_w32(XO_FORM(59, frd, fra, frb, XO_FSUB, 0));
+}
+static void emit_fmuls(int frd, int fra, int frb)
+{
+    output_w32(XO_FORM(59, frd, fra, frb, XO_FMUL, 0));
+}
+static void emit_fdivs(int frd, int fra, int frb)
+{
+    output_w32(XO_FORM(59, frd, fra, frb, XO_FDIV, 0));
+}
+
+/* FP X-form unary: opcode(6) | frt(5) | ra(5)| rb(5) | xo(10) | rc(1)    */
+/* For unary ops: frb is at ra position (bits 20-16), rb=0                 */
+static void emit_fsqrt(int frt, int frb)
+{
+    output_w32(X_FORM(63, frt, frb, 0, XO_FSQRT, 0));
+}
+static void emit_fsqrts(int frt, int frb)
+{
+    output_w32(X_FORM(59, frt, frb, 0, XO_FSQRT, 0));
+}
+static void emit_fabs(int frt, int frb)
+{
+    output_w32(X_FORM(63, frt, frb, 0, XO_FABS, 0));
+}
+static void emit_fmr(int frt, int frb)
+{
+    output_w32(X_FORM(63, frt, frb, 0, XO_FMR, 0));
+}
+static void emit_fneg(int frt, int frb)
+{
+    output_w32(X_FORM(63, frt, frb, 0, XO_FNEG, 0));
+}
+
+/* Conversion & FPSCR */
+static void emit_fctiwz(int frt, int frb)
+{
+    output_w32(X_FORM(63, frt, frb, 0, XO_FCTIWZ, 0));
+}
+static void emit_fctiw(int frt, int frb)
+{
+    output_w32(X_FORM(63, frt, frb, 0, XO_FCTIW, 0));
+}
+static void emit_frsp(int frt, int frb)
+{
+    /* frsp — round double to single precision */
+    output_w32(X_FORM(63, frt, frb, 0, XO_FRSP, 0));
+}
+static void emit_fcfid(int frt, int frb)
+{
+    /* fcfid — convert int64 in frb to double in frt */
+    output_w32(X_FORM(63, frt, frb, 0, XO_FCFID, 0));
+}
+static void emit_mffs(int frt)
+{
+    /* mffs frt — move FPSCR to FPR frt */
+    output_w32(X_FORM(63, frt, 0, 0, XO_MFFS, 0));
+}
+static void emit_mtfsfi(int bf, int imm)
+{
+    /* mtfsfi bf,imm — set FPSCR field BF to 4-bit IMM */
+    /* Encoding: (63<<26) | (bf<<23) | (0<<21) | (imm<<16) | (0<<11) | (134<<1) | 0 */
+    output_w32((63 << 26) | ((bf) << 23) | ((imm) << 16) | (XO_MTFSFI << 1));
+}
+
+/* FP loads/stores — D-form with FPR (frt/frs is raw FPR number) */
+static void emit_lfs(int frt, int offset, int ra)
+{
+    output_w32(D_FORM(OP_LFS, frt, ra, offset));
+}
+static void emit_lfd(int frt, int offset, int ra)
+{
+    output_w32(D_FORM(OP_LFD, frt, ra, offset));
+}
+static void emit_stfs(int frs, int offset, int ra)
+{
+    output_w32(D_FORM(OP_STFS, frs, ra, offset));
+}
+static void emit_stfd(int frs, int offset, int ra)
+{
+    output_w32(D_FORM(OP_STFD, frs, ra, offset));
+}
+
+/* STFIWX: store FPR as 32-bit integer, opcode=31, X-form */
+/* X_FORM(31, frs, ra, rb, 983, 0) */
+static void emit_stfiwx(int frs, int ra, int rb)
+{
+    output_w32(X_FORM(31, frs, ra, rb, XO_STFIWX, 0));
+}
+
+/* FCMPU: FP compare unordered, sets CR field crfd */
+/* Encoding: X_FORM(63, crfd<<2, fra, frb, 0, 0) */
+static void emit_fcmpu(int crfd, int fra, int frb)
+{
+    output_w32(X_FORM(63, crfd << 2, fra, frb, XO_FCMPU, 0));
+}
+
+/* ======================================================================== */
+/* fconv_assemble — FPU conversion & rounding ops                           */
 /* ======================================================================== */
 #define fconv_assemble fconv_assemble_ppc64
 static void fconv_assemble_ppc64(int i, struct regstat *i_regs)
@@ -2818,6 +3058,88 @@ static void fconv_assemble_ppc64(int i, struct regstat *i_regs)
     int fd = (source[i] >> 6) & 0x1f;
     int op = source[i] & 0x3f;
     int op2 = opcode2[i];
+
+    /* ================================================================== */
+    /* Native PPC conversions                                              */
+    /* ================================================================== */
+
+    /* cvt_s_w: op2=0x14, op=0x20  (int32 -> float) — no direct PPC insn */
+    /* cvt_d_w: op2=0x14, op=0x21  (int32 -> double) — no direct PPC insn */
+    /* cvt_s_l: op2=0x15, op=0x20  (int64 -> float) — C fallback */
+    /* cvt_d_l: op2=0x15, op=0x21  (int64 -> double) — C fallback */
+
+    /* cvt_d_s: op2=0x10, op=0x21  (float -> double): lfs auto-extends to double */
+    if(op2 == 0x10 && op == 0x21) {
+        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], temp);
+        emit_lfs(FPR_SCR0, 0, HREG(temp));
+        if(fs != fd)
+            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fd], temp);
+        emit_stfd(FPR_SCR0, 0, HREG(temp));
+        return;
+    }
+
+    /* cvt_s_d: op2=0x11, op=0x20  (double -> float) */
+    if(op2 == 0x11 && op == 0x20) {
+        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], temp);
+        emit_lfd(FPR_SCR0, 0, HREG(temp));
+        emit_frsp(FPR_SCR0, FPR_SCR0);
+        if(fs != fd)
+            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], temp);
+        emit_stfs(FPR_SCR0, 0, HREG(temp));
+        return;
+    }
+
+    /* cvt_w_s: op2=0x10, op=0x24  (float -> int32, truncation) */
+    if(op2 == 0x10 && op == 0x24) {
+        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], temp);
+        emit_lfs(FPR_SCR0, 0, HREG(temp));
+        emit_fctiwz(FPR_SCR0, FPR_SCR0);
+        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], HOST_TEMPREG);
+        emit_stfiwx(FPR_SCR0, 0, HREG(HOST_TEMPREG));
+        return;
+    }
+
+    /* cvt_w_d: op2=0x11, op=0x24  (double -> int32, truncation) */
+    if(op2 == 0x11 && op == 0x24) {
+        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], temp);
+        emit_lfd(FPR_SCR0, 0, HREG(temp));
+        emit_fctiwz(FPR_SCR0, FPR_SCR0);
+        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], HOST_TEMPREG);
+        emit_stfiwx(FPR_SCR0, 0, HREG(HOST_TEMPREG));
+        return;
+    }
+
+    /* Single-precision rounding: TRUNC_W_S (op2=0x10, op=0x0d) */
+    if(op2 == 0x10 && op == 0x0d) {
+        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], temp);
+        emit_lfs(FPR_SCR0, 0, HREG(temp));
+        emit_fctiwz(FPR_SCR0, FPR_SCR0);
+        if(fs != fd)
+            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], temp);
+        emit_stfiwx(FPR_SCR0, 0, HREG(temp));
+        return;
+    }
+
+    /* Double-precision rounding: TRUNC_W_D (op2=0x11, op=0x0d) */
+    if(op2 == 0x11 && op == 0x0d) {
+        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], temp);
+        emit_lfd(FPR_SCR0, 0, HREG(temp));
+        emit_fctiwz(FPR_SCR0, FPR_SCR0);
+        if(fs != fd)
+            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], temp);
+        emit_stfiwx(FPR_SCR0, 0, HREG(temp));
+        return;
+    }
+
+    /* ================================================================== */
+    /* C fallbacks for int-to-float, int64, rounding variants              */
+    /* ================================================================== */
+
+    reglist = 0;
+    for(hr = 0; hr < HOST_REGS; hr++) {
+        if(i_regs->regmap[hr] >= 0) reglist |= 1 << hr;
+    }
+    save_regs(reglist);
 
     /* cvt_s_w: op2=0x14, op=0x20  (int32 -> float) */
     if(op2 == 0x14 && op == 0x20) {
@@ -2847,40 +3169,12 @@ static void fconv_assemble_ppc64(int i, struct regstat *i_regs)
         emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fd], PPC_HREG(ARG3_REG));
         emit_call((intptr_t)cvt_d_l);
     }
-    /* cvt_d_s: op2=0x10, op=0x21  (float -> double) */
-    if(op2 == 0x10 && op == 0x21) {
-        emit_addimm64(FP, fp_fcr31, PPC_HREG(ARG1_REG));
-        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], PPC_HREG(ARG2_REG));
-        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fd], PPC_HREG(ARG3_REG));
-        emit_call((intptr_t)cvt_d_s);
-    }
-    /* cvt_w_s: op2=0x10, op=0x24  (float -> int32) */
-    if(op2 == 0x10 && op == 0x24) {
-        emit_addimm64(FP, fp_fcr31, PPC_HREG(ARG1_REG));
-        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], PPC_HREG(ARG2_REG));
-        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], PPC_HREG(ARG3_REG));
-        emit_call((intptr_t)cvt_w_s);
-    }
     /* cvt_l_s: op2=0x10, op=0x25  (float -> int64) */
     if(op2 == 0x10 && op == 0x25) {
         emit_addimm64(FP, fp_fcr31, PPC_HREG(ARG1_REG));
         emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], PPC_HREG(ARG2_REG));
         emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fd], PPC_HREG(ARG3_REG));
         emit_call((intptr_t)cvt_l_s);
-    }
-    /* cvt_s_d: op2=0x11, op=0x20  (double -> float) */
-    if(op2 == 0x11 && op == 0x20) {
-        emit_addimm64(FP, fp_fcr31, PPC_HREG(ARG1_REG));
-        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], PPC_HREG(ARG2_REG));
-        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], PPC_HREG(ARG3_REG));
-        emit_call((intptr_t)cvt_s_d);
-    }
-    /* cvt_w_d: op2=0x11, op=0x24  (double -> int32) */
-    if(op2 == 0x11 && op == 0x24) {
-        emit_addimm64(FP, fp_fcr31, PPC_HREG(ARG1_REG));
-        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], PPC_HREG(ARG2_REG));
-        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], PPC_HREG(ARG3_REG));
-        emit_call((intptr_t)cvt_w_d);
     }
     /* cvt_l_d: op2=0x11, op=0x25  (double -> int64) */
     if(op2 == 0x11 && op == 0x25) {
@@ -2890,7 +3184,7 @@ static void fconv_assemble_ppc64(int i, struct regstat *i_regs)
         emit_call((intptr_t)cvt_l_d);
     }
 
-    /* Single-precision rounding: (source, dest) - no fcr31 */
+    /* Single-precision rounding variants (non-truncation) */
     if(op2 == 0x10 && op == 0x08) {
         emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], PPC_HREG(ARG1_REG));
         emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fd], PPC_HREG(ARG2_REG));
@@ -2916,11 +3210,6 @@ static void fconv_assemble_ppc64(int i, struct regstat *i_regs)
         emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], PPC_HREG(ARG2_REG));
         emit_call((intptr_t)round_w_s);
     }
-    if(op2 == 0x10 && op == 0x0d) {
-        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], PPC_HREG(ARG1_REG));
-        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], PPC_HREG(ARG2_REG));
-        emit_call((intptr_t)trunc_w_s);
-    }
     if(op2 == 0x10 && op == 0x0e) {
         emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], PPC_HREG(ARG1_REG));
         emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], PPC_HREG(ARG2_REG));
@@ -2932,7 +3221,7 @@ static void fconv_assemble_ppc64(int i, struct regstat *i_regs)
         emit_call((intptr_t)floor_w_s);
     }
 
-    /* Double-precision rounding: (source, dest) - no fcr31 */
+    /* Double-precision rounding variants (non-truncation) */
     if(op2 == 0x11 && op == 0x08) {
         emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], PPC_HREG(ARG1_REG));
         emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fd], PPC_HREG(ARG2_REG));
@@ -2958,11 +3247,6 @@ static void fconv_assemble_ppc64(int i, struct regstat *i_regs)
         emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], PPC_HREG(ARG2_REG));
         emit_call((intptr_t)round_w_d);
     }
-    if(op2 == 0x11 && op == 0x0d) {
-        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], PPC_HREG(ARG1_REG));
-        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], PPC_HREG(ARG2_REG));
-        emit_call((intptr_t)trunc_w_d);
-    }
     if(op2 == 0x11 && op == 0x0e) {
         emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], PPC_HREG(ARG1_REG));
         emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], PPC_HREG(ARG2_REG));
@@ -2978,7 +3262,7 @@ static void fconv_assemble_ppc64(int i, struct regstat *i_regs)
 }
 
 /* ======================================================================== */
-/* float_assemble — FPU arithmetic ops via C fallback                        */
+/* float_assemble — FPU arithmetic ops via native PPC FP instructions       */
 /* ======================================================================== */
 static void float_assemble(int i, struct regstat *i_regs)
 {
@@ -2993,11 +3277,6 @@ static void float_assemble(int i, struct regstat *i_regs)
         add_stub(FP_STUB, jaddr, (intptr_t)out, i, cs, (intptr_t)i_regs, is_delayslot, 0);
         cop1_usable = 1;
     }
-    u_int hr, reglist = 0;
-    for(hr = 0; hr < HOST_REGS; hr++) {
-        if(i_regs->regmap[hr] >= 0) reglist |= 1 << hr;
-    }
-    save_regs(reglist);
 
     int fs = (source[i] >> 11) & 0x1f;
     int ft = (source[i] >> 16) & 0x1f;
@@ -3007,81 +3286,113 @@ static void float_assemble(int i, struct regstat *i_regs)
 
     /* Single precision (op2=0x10, op=0x00-0x07) */
     if(op2 == 0x10 && (op & ~7) == 0) {
-        switch(op) {
-        case 0x00: case 0x01: case 0x02: case 0x03:
-            emit_addimm64(FP, fp_fcr31, PPC_HREG(ARG1_REG));
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], PPC_HREG(ARG2_REG));
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[ft], PPC_HREG(ARG3_REG));
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], PPC_HREG(ARG4_REG));
-            break;
-        case 0x04:
-            emit_addimm64(FP, fp_fcr31, PPC_HREG(ARG1_REG));
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], PPC_HREG(ARG2_REG));
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], PPC_HREG(ARG3_REG));
-            break;
-        case 0x05: case 0x07:
-            emit_addimm64(FP, fp_fcr31, PPC_HREG(ARG1_REG));
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], PPC_HREG(ARG2_REG));
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], PPC_HREG(ARG3_REG));
-            break;
-        case 0x06:
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], PPC_HREG(ARG1_REG));
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], PPC_HREG(ARG2_REG));
-            break;
+        if(op >= 0 && op <= 3) {
+            /* 3-arg: add/sub/mul/div */
+            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], temp);
+            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[ft], HOST_TEMPREG);
+            emit_lfs(FPR_SCR0, 0, HREG(temp));
+            emit_lfs(FPR_SCR1, 0, HREG(HOST_TEMPREG));
+            switch(op) {
+            case 0: emit_fadds(FPR_SCR2, FPR_SCR0, FPR_SCR1); break;
+            case 1: emit_fsubs(FPR_SCR2, FPR_SCR0, FPR_SCR1); break;
+            case 2: emit_fmuls(FPR_SCR2, FPR_SCR0, FPR_SCR1); break;
+            case 3: emit_fdivs(FPR_SCR2, FPR_SCR0, FPR_SCR1); break;
+            }
+            if(fs != fd && ft != fd)
+                emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], temp);
+            emit_stfs(FPR_SCR2, 0, HREG(temp));
+        } else if(op == 4) {
+            /* sqrt_s */
+            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], temp);
+            emit_lfs(FPR_SCR0, 0, HREG(temp));
+            emit_fsqrts(FPR_SCR0, FPR_SCR0);
+            if(fs != fd)
+                emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], temp);
+            emit_stfs(FPR_SCR0, 0, HREG(temp));
+        } else if(op == 5) {
+            /* abs_s */
+            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], temp);
+            emit_lfs(FPR_SCR0, 0, HREG(temp));
+            emit_fabs(FPR_SCR0, FPR_SCR0);
+            if(fs != fd)
+                emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], temp);
+            emit_stfs(FPR_SCR0, 0, HREG(temp));
+        } else if(op == 6) {
+            /* mov_s */
+            if(fs != fd) {
+                emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], temp);
+                emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], HOST_TEMPREG);
+                emit_lfs(FPR_SCR0, 0, HREG(temp));
+                emit_stfs(FPR_SCR0, 0, HREG(HOST_TEMPREG));
+            }
+        } else if(op == 7) {
+            /* neg_s */
+            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], temp);
+            emit_lfs(FPR_SCR0, 0, HREG(temp));
+            emit_fneg(FPR_SCR0, FPR_SCR0);
+            if(fs != fd)
+                emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fd], temp);
+            emit_stfs(FPR_SCR0, 0, HREG(temp));
         }
-        switch(op) {
-        case 0x00: emit_call((intptr_t)add_s); break;
-        case 0x01: emit_call((intptr_t)sub_s); break;
-        case 0x02: emit_call((intptr_t)mul_s); break;
-        case 0x03: emit_call((intptr_t)div_s); break;
-        case 0x04: emit_call((intptr_t)sqrt_s); break;
-        case 0x05: emit_call((intptr_t)abs_s); break;
-        case 0x06: emit_call((intptr_t)mov_s); break;
-        case 0x07: emit_call((intptr_t)neg_s); break;
-        }
+        return;
     }
 
     /* Double precision (op2=0x11, op=0x00-0x07) */
     if(op2 == 0x11 && (op & ~7) == 0) {
-        switch(op) {
-        case 0x00: case 0x01: case 0x02: case 0x03:
-            emit_addimm64(FP, fp_fcr31, PPC_HREG(ARG1_REG));
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], PPC_HREG(ARG2_REG));
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[ft], PPC_HREG(ARG3_REG));
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fd], PPC_HREG(ARG4_REG));
-            break;
-        case 0x04:
-            emit_addimm64(FP, fp_fcr31, PPC_HREG(ARG1_REG));
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], PPC_HREG(ARG2_REG));
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fd], PPC_HREG(ARG3_REG));
-            break;
-        case 0x05: case 0x07:
-            emit_addimm64(FP, fp_fcr31, PPC_HREG(ARG1_REG));
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], PPC_HREG(ARG2_REG));
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fd], PPC_HREG(ARG3_REG));
-            break;
-        case 0x06:
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], PPC_HREG(ARG1_REG));
-            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fd], PPC_HREG(ARG2_REG));
-            break;
+        if(op >= 0 && op <= 3) {
+            /* 3-arg: add/sub/mul/div */
+            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], temp);
+            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[ft], HOST_TEMPREG);
+            emit_lfd(FPR_SCR0, 0, HREG(temp));
+            emit_lfd(FPR_SCR1, 0, HREG(HOST_TEMPREG));
+            switch(op) {
+            case 0: emit_fadd(FPR_SCR2, FPR_SCR0, FPR_SCR1); break;
+            case 1: emit_fsub(FPR_SCR2, FPR_SCR0, FPR_SCR1); break;
+            case 2: emit_fmul(FPR_SCR2, FPR_SCR0, FPR_SCR1); break;
+            case 3: emit_fdiv(FPR_SCR2, FPR_SCR0, FPR_SCR1); break;
+            }
+            if(fs != fd && ft != fd)
+                emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fd], temp);
+            emit_stfd(FPR_SCR2, 0, HREG(temp));
+        } else if(op == 4) {
+            /* sqrt_d */
+            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], temp);
+            emit_lfd(FPR_SCR0, 0, HREG(temp));
+            emit_fsqrt(FPR_SCR0, FPR_SCR0);
+            if(fs != fd)
+                emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fd], temp);
+            emit_stfd(FPR_SCR0, 0, HREG(temp));
+        } else if(op == 5) {
+            /* abs_d */
+            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], temp);
+            emit_lfd(FPR_SCR0, 0, HREG(temp));
+            emit_fabs(FPR_SCR0, FPR_SCR0);
+            if(fs != fd)
+                emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fd], temp);
+            emit_stfd(FPR_SCR0, 0, HREG(temp));
+        } else if(op == 6) {
+            /* mov_d */
+            if(fs != fd) {
+                emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], temp);
+                emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fd], HOST_TEMPREG);
+                emit_lfd(FPR_SCR0, 0, HREG(temp));
+                emit_stfd(FPR_SCR0, 0, HREG(HOST_TEMPREG));
+            }
+        } else if(op == 7) {
+            /* neg_d */
+            emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], temp);
+            emit_lfd(FPR_SCR0, 0, HREG(temp));
+            emit_fneg(FPR_SCR0, FPR_SCR0);
+            if(fs != fd)
+                emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fd], temp);
+            emit_stfd(FPR_SCR0, 0, HREG(temp));
         }
-        switch(op) {
-        case 0x00: emit_call((intptr_t)add_d); break;
-        case 0x01: emit_call((intptr_t)sub_d); break;
-        case 0x02: emit_call((intptr_t)mul_d); break;
-        case 0x03: emit_call((intptr_t)div_d); break;
-        case 0x04: emit_call((intptr_t)sqrt_d); break;
-        case 0x05: emit_call((intptr_t)abs_d); break;
-        case 0x06: emit_call((intptr_t)mov_d); break;
-        case 0x07: emit_call((intptr_t)neg_d); break;
-        }
+        return;
     }
-
-    restore_regs(reglist);
 }
 
 /* ======================================================================== */
-/* fcomp_assemble — FPU compare ops via C fallback                           */
+/* fcomp_assemble — FPU compare ops via native PPC fcmpu                     */
 /* ======================================================================== */
 static void fcomp_assemble(int i, struct regstat *i_regs)
 {
@@ -3098,73 +3409,75 @@ static void fcomp_assemble(int i, struct regstat *i_regs)
     }
     signed char fs_host = get_reg(i_regs->regmap, FSREG);
     assert(fs_host >= 0);
-    u_int hr, reglist = 0;
-    for(hr = 0; hr < HOST_REGS; hr++) {
-        if(i_regs->regmap[hr] >= 0) reglist |= 1 << hr;
-    }
-    reglist &= ~(1 << fs_host);
-    emit_storereg(FSREG, fs_host);
-    save_regs(reglist);
 
     int fs = (source[i] >> 11) & 0x1f;
     int ft = (source[i] >> 16) & 0x1f;
     int op = source[i] & 0x3f;
     int op2 = opcode2[i];
 
-    /* Single precision compare */
+    /* ================================================================== */
+    /* Native PPC fcmpu — single & double precision                        */
+    /* ================================================================== */
+
+    /* CR0 bit masks in mfcr result (CR0 at bits 28-31 of GPR):
+     *   LT = 0x80000000 (bit 31)  — ordered less than
+     *   GT = 0x40000000 (bit 30)  — ordered greater than
+     *   EQ = 0x20000000 (bit 29)  — ordered equal
+     *   SO = 0x10000000 (bit 28)  — unordered (NaN)
+     * Tests use emit_testimm(HOST_TEMPREG, mask) which sets CR0[EQ]=1 if mask==0.
+     * bc BT_BO(12), 2 (=EQ), +2 skips the OR when mask result is zero (condition false).
+     */
+
+    /* Always-false ops: c_f (0x30), c_sf (0x38) — just clear bit 23 */
+    if(op == 0x30 || op == 0x38) {
+        emit_andimm(fs_host, ~0x800000, fs_host);
+        return;
+    }
+
+    /* Compute CR0 bitmask for the MIPS condition */
+    u_int cr_mask;
+    switch(op) {
+    case 0x31: case 0x39: /* c_un, c_ngle: unordered (SO) */
+        cr_mask = 0x10000000; break;
+    case 0x32: case 0x3a: /* c_eq, c_seq: equal (EQ) */
+        cr_mask = 0x20000000; break;
+    case 0x33: case 0x3b: /* c_ueq, c_ngl: EQ|SO */
+        cr_mask = 0x30000000; break;
+    case 0x34: case 0x3c: /* c_olt, c_lt: LT */
+        cr_mask = 0x80000000; break;
+    case 0x35: case 0x3d: /* c_ult, c_nge: LT|SO */
+        cr_mask = 0x90000000; break;
+    case 0x36: case 0x3e: /* c_ole, c_le: LT|EQ */
+        cr_mask = 0xA0000000; break;
+    case 0x37: case 0x3f: /* c_ule, c_ngt: LT|EQ|SO */
+        cr_mask = 0xB0000000; break;
+    default:
+        cr_mask = 0; break;
+    }
+
+    /* Load operands into FPR scratch registers */
     if(op2 == 0x10) {
-        emit_addimm64(FP, fp_fcr31, PPC_HREG(ARG1_REG));
-        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], PPC_HREG(ARG2_REG));
-        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[ft], PPC_HREG(ARG3_REG));
-        switch(op) {
-        case 0x30: emit_call((intptr_t)c_f_s); break;
-        case 0x31: emit_call((intptr_t)c_un_s); break;
-        case 0x32: emit_call((intptr_t)c_eq_s); break;
-        case 0x33: emit_call((intptr_t)c_ueq_s); break;
-        case 0x34: emit_call((intptr_t)c_olt_s); break;
-        case 0x35: emit_call((intptr_t)c_ult_s); break;
-        case 0x36: emit_call((intptr_t)c_ole_s); break;
-        case 0x37: emit_call((intptr_t)c_ule_s); break;
-        case 0x38: emit_call((intptr_t)c_sf_s); break;
-        case 0x39: emit_call((intptr_t)c_ngle_s); break;
-        case 0x3a: emit_call((intptr_t)c_seq_s); break;
-        case 0x3b: emit_call((intptr_t)c_ngl_s); break;
-        case 0x3c: emit_call((intptr_t)c_lt_s); break;
-        case 0x3d: emit_call((intptr_t)c_nge_s); break;
-        case 0x3e: emit_call((intptr_t)c_le_s); break;
-        case 0x3f: emit_call((intptr_t)c_ngt_s); break;
-        default: break;
-        }
+        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[fs], temp);
+        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_simple[ft], HOST_TEMPREG);
+        emit_lfs(FPR_SCR0, 0, HREG(temp));
+        emit_lfs(FPR_SCR1, 0, HREG(HOST_TEMPREG));
+    } else {
+        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], temp);
+        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[ft], HOST_TEMPREG);
+        emit_lfd(FPR_SCR0, 0, HREG(temp));
+        emit_lfd(FPR_SCR1, 0, HREG(HOST_TEMPREG));
     }
 
-    /* Double precision compare */
-    if(op2 == 0x11) {
-        emit_addimm64(FP, fp_fcr31, PPC_HREG(ARG1_REG));
-        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[fs], PPC_HREG(ARG2_REG));
-        emit_readptr((intptr_t)&g_dev.r4300.new_dynarec_hot_state.cp1_regs_double[ft], PPC_HREG(ARG3_REG));
-        switch(op) {
-        case 0x30: emit_call((intptr_t)c_f_d); break;
-        case 0x31: emit_call((intptr_t)c_un_d); break;
-        case 0x32: emit_call((intptr_t)c_eq_d); break;
-        case 0x33: emit_call((intptr_t)c_ueq_d); break;
-        case 0x34: emit_call((intptr_t)c_olt_d); break;
-        case 0x35: emit_call((intptr_t)c_ult_d); break;
-        case 0x36: emit_call((intptr_t)c_ole_d); break;
-        case 0x37: emit_call((intptr_t)c_ule_d); break;
-        case 0x38: emit_call((intptr_t)c_sf_d); break;
-        case 0x39: emit_call((intptr_t)c_ngle_d); break;
-        case 0x3a: emit_call((intptr_t)c_seq_d); break;
-        case 0x3b: emit_call((intptr_t)c_ngl_d); break;
-        case 0x3c: emit_call((intptr_t)c_lt_d); break;
-        case 0x3d: emit_call((intptr_t)c_nge_d); break;
-        case 0x3e: emit_call((intptr_t)c_le_d); break;
-        case 0x3f: emit_call((intptr_t)c_ngt_d); break;
-        default: break;
-        }
-    }
+    /* Clear fcr31 condition flag bit 23, then compare and conditionally set */
+    emit_andimm(fs_host, ~0x800000, fs_host);
+    emit_fcmpu(0, FPR_SCR0, FPR_SCR1);
+    /* Get CR into GPR — mfcr r12 (HOST_TEMPREG) */
+    output_w32(X_FORM(OP_MFXSR, HREG(HOST_TEMPREG), 0, 0, XO_MFCR, 0));
 
-    restore_regs(reglist);
-    emit_loadreg(FSREG, fs_host);
+    /* Test the condition bits, skip OR if none set */
+    emit_testimm(HOST_TEMPREG, cr_mask);
+    output_w32(B_FORM(OP_BC, BT_BO, 2, 2, 0, 0)); /* bc 12, 2, +8: skip if EQ=1 (mask==0) */
+    emit_orimm(fs_host, 0x800000, fs_host);
 }
 
 /* ======================================================================== */

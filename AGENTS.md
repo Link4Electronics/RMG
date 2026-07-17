@@ -142,21 +142,23 @@ GLideN64 uses ad-hoc XOR patterns on pointers/indexes to compensate for LE byte-
 | `emit_movimm64` wrong 64-bit constant construction | Segfault at code buffer+0x10 on first block | Rewrite to build upper 32 bits → `sldi` by 32 → lower 32 bits (proper PPC64 pattern) |
 | `emit_jeq`/`emit_jne`/etc BO values swapped | Game data never loaded — BNE inverted → RI_SELECT check always fell through | Revert: `jeq→12`, `jne→4`, `jl→12`, `jge→4`, `jb→12`, `jae→4`, `js→12`, `jns→4`, `jno→4` (all `bt`=BO12, `bf`=BO4) |
 
-### FPU support — C fallbacks (PPC scalar FPU not used)
+### FPU support — Native PPC FP instructions
 
-| Function | Handler | Ops covered |
-|----------|---------|-------------|
-| `fconv_assemble_ppc64` | C fallback via named funcs | cvt_s/d_w/l, cvt_d/s, cvt_w/l_s/d, rounding ops |
-| `float_assemble` | C fallback via named funcs | add/sub/mul/div/sqrt/abs/mov/neg (single & double) |
-| `fcomp_assemble` | C fallback via named funcs | c_f/un/eq/ueq/olt/ult/ole/ule/sf/ngle/seq/ngl/lt/nge/le/ngt |
+| Function | Ops handled natively | Ops via C fallback |
+|----------|---------------------|-------------------|
+| `fconv_assemble_ppc64` | cvt_d_s (lfs auto-extends), cvt_s_d (lfd+frsp+stfs), cvt_w_s/d (fctiwz+stfiwx), trunc_w_s/d | cvt_s/d_w (int→float, no PPC insn for int32→FP on G5), cvt_s/d_l (int64), round/ceil/floor (w/l, s/d) |
+| `float_assemble` | add/sub/mul/div/sqrt/abs/mov/neg (single & double via fadds/fadd, fsubs/fsub, fmuls/fmul, fdivs/fdiv, fsqrts/fsqrt, fabs, fmr, fneg) | None |
+| `fcomp_assemble` | All 16 C.cond ops (c_f/un/eq/ueq/olt/ult/ole/ule/sf/ngle/seq/ngl/lt/nge/le/ngt) via fcmpu + mfcr + bc-skip | None |
 
-No NEON or native PPC FPU instructions are used — AltiVec not used (the FPU C fallbacks are architecture-agnostic). Native PPC scalar FP assembly (fadd, fmul, etc.) is a future optimization.
+### FPU bug notes
 
-### FPU bug notes (ARM64 originals fixed in PPC64)
+- **ARM64 C fallback port**: ARM64's C fallback for `cvt_d_w`/`cvt_d_s` had **ARG1_REG overwrite** bug. **Fixed** in PPC64 version.
+- **`PPC_HREG` misuse**: C fallback section used `PPC_HREG(ARG*_REG)` for raw PPC register numbers, which happens to work for ARG1-3 but fails for ARG4_REG (index 3 → unresolved host_reg_ppc[3]). Native FP code uses `HREG(temp)` correctly.
+- **Duplicate C fallback calls**: Original `fconv_assemble` called C functions twice for same ops (once in inline C section, once in save_regs section). Removed duplicate inline section — C fallbacks now execute only once with proper save/restore_regs.
 
-- ARM64's C fallback for `cvt_d_w` and `cvt_d_s` has **ARG1_REG overwrite** bug (fcr31 pointer clobbered by source pointer). **Fixed** in PPC64 version — uses distinct ARGn_REGs.
-- `float_assemble` C fallback for `abs_s`/`neg_s` in ARM64 also clobbers fcr31. **Fixed** — separate args for fcr31, source, dest.
-- `mov_s`/`mov_d` correctly skip fcr31 (2-arg functions).
+### emitters added
+
+All at `assem_ppc64.c:~2860` — 24 PPC FPU emitter functions: `emit_fadd[s]`, `emit_fsub[s]`, `emit_fmul[s]`, `emit_fdiv[s]`, `emit_fsqrt[s]`, `emit_fabs`, `emit_fmr`, `emit_fneg`, `emit_fctiwz`, `emit_fctiw`, `emit_frsp`, `emit_fcfid`, `emit_mffs`, `emit_mtfsfi`, `emit_lfs`, `emit_lfd`, `emit_stfs`, `emit_stfd`, `emit_stfiwx`, `emit_fcmpu`.
 
 ### Not yet written (low priority)
 
@@ -167,7 +169,8 @@ All emitters are implemented. Future optimizations:
 | emit_prefetchreg | Implemented (dcbt) |
 | emit_cmov_* variants | Uses bc+skip pattern |
 | conditional moves within generated code | Uses bc+skip pattern |
-| Native PPC scalar FPU (fadd/fmul/fdiv) | C fallbacks (working) |
+| Native PPC FPU with FMAs (fmadd/fmsub) | C fallbacks (working) |
+| Int32→float/double native (fcfid on PPC970) | Not possible — G5 lacks fcfid |
 
 ---
 
@@ -183,9 +186,9 @@ The PPC64 backend has built-in stderr diagnostics (added 2024-06):
 # Estimated completion: ~45%
 
 ## Code structure: ~98%
-All required functions exist and compile clean (0 errors, 0 warnings). The file is structurally complete at ~3057 lines (ARM64 reference is 4661 — PPC64 is shorter because FPU uses C fallbacks instead of NEON SIMD assembly).
+All required functions exist and compile clean (0 errors, 0 warnings). The file is structurally complete at ~3489 lines.
 
-## Runtime correctness: ~10%
+## Runtime correctness: ~15%
 The generated code was **incorrect** because all branch emitters had inverted BO values (commit 8958b913 swapped BO=12↔BO=4). SM64 booted to black screen — BNE at the RI_SELECT check always fell through, so IPL3 never loaded the game. After reverting BO values to the original correct mapping, the dynarec should now follow the correct code paths.
 
 ## Breakdown by subsystem
@@ -197,9 +200,10 @@ The generated code was **incorrect** because all branch emitters had inverted BO
 | Memory load/store (D-form) | **Likely OK** | Uses `D_FORM_HR`, FP offsets within range |
 | 64-bit constant loading | **FIXED** | Was broken (missing `sldi`), now correct |
 | Register allocator | **Likely OK** | Same as other archs, tested |
-| TLB / memory map | **Untested** | Need to verify mapping logic on BE |
+| TLB / memory map | **IN PROGRESS** | Dynamic KSEG0 fast path added (andis. bit-31 check + ram_offset). Memory_map lookup still needed for non-KSEG0. |
 | Mini-HT (hash table jump) | **Untested** | May have reg-index vs PPC-num confusion |
-| FPU C fallbacks | **Untested** | Only triggers if game uses FPU early |
+| FPU native PPC | **IMPLEMENTED** | All float/fconv/fcomp ops use native PPC FP. C fallbacks only for int-to-float, int64, round/ceil/floor. |
+| FPU C fallbacks | **Likely OK** | C fallbacks preserved for unsupported ops (int→float, int64, rounding variants). |
 | Cycle counting / cc_interrupt | **Untested** | Depends on `emit_addimm_and_set_flags` CR0 behavior |
 | `jump_vaddr_reg[]` trampolines | **Untested** | Indexed by PPC register number |
 | Linkage assembly | **Likely OK** | Working — first block entered successfully |
@@ -221,8 +225,10 @@ The generated code was **incorrect** because all branch emitters had inverted BO
 # Old PPC64 Dynarec
 Removed on commit ab38c35a, contained some things that may or may not worth porting to PPC64 new_dynarec
 
-Fastmem direct KSEG0→RDRAM — old code has RLWINM(rd,base,0,2,31); ORIS(rd,rd,0x4000) for inlined loads from KSEG0, avoiding C fallback for every memory access.
-FPU native PPC instructions — old code uses fctiwz, mtfsfi, fcmpu, stfiwx directly instead of C fallbacks. Currently our backend uses C for everything FPU.
+Fastmem direct KSEG0→RDRAM — old code has RLWINM(rd,base,0,2,31); ORIS(rd,rd,0x4000) for inlined loads from KSEG0, relying on fixed 0x40000000 RDRAM mapping. **Ported**: new PPC64 backend uses `ram_offset = dram - 0x80000000` + direct `addr + ram_offset` for both:
+  - **Non-TLB path** (`emit_jno` fixed to use `andis.` bit-31 test instead of broken `cmpwi`×`blt`),
+  - **TLB path** (`do_tlb_r`/`do_tlb_w` emit runtime KSEG0 check with `andis.` → bypass memory_map for 0x80000000+ addresses).
+FPU native PPC instructions — old code uses fctiwz, mtfsfi, fcmpu, stfiwx directly instead of C fallbacks. **Implemented** in new backend (`assem_ppc64.c:~2860` — 24 FPU emitters; all float/fconv/fcomp ops use native PPC FP).
 Interrupt clamping — PPCD_CHECK_INTERVAL forces periodic returns to the dispatcher, preventing infinite loops in compiled code.
 decodeNInterpret() — ~500-line C interpreter for un-compilable instructions. Could serve as gen_interpreter() fallback.
 Per-block jump resolution — the RecompCache_Link approach backpatches 5+ instructions for far targets (needed when 24-bit B-range is insufficient).
